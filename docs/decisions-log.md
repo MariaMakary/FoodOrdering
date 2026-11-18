@@ -1,0 +1,106 @@
+# Decisions Log
+
+Design decisions that both apps (Client.Web and Admin.Web) must follow. New decisions are added at the bottom.
+
+---
+
+## DEC-001: Order lifecycle and status rules (UNI-56)
+
+**Date:** 2026-11-18
+**Related tickets:** UNI-89 (Admin status changes), UNI-69 (Client cancel), UNI-57 (messages)
+**Code:** `Shared.Contracts/Enums/`
+**Diagram:** [order-lifecycle.png](order-lifecycle.png)
+
+### Enums
+
+| Enum | Values |
+|---|---|
+| `OrderStatus` | Placed, Accepted, Rejected, Preparing, Ready, OutForDelivery, Delivered, Cancelled |
+| `PaymentStatus` | Unpaid, Paid, CashOnDelivery |
+| `DeliveryType` | Delivery, Pickup |
+| `PaymentMethod` | Online, Cash |
+
+### Allowed status changes
+
+Any change that is not in this table is not allowed. The app that receives it ignores it and logs a warning.
+
+| From | To | Who | App | Message |
+|---|---|---|---|---|
+| (new) | Placed | Customer | Client | `OrderPlaced` |
+| Placed | Cancelled | Customer | Client | `OrderCancelled` |
+| Placed | Accepted (+ETA) | Staff/Admin | Admin | `OrderStatusChanged` |
+| Placed | Rejected (+reason) | Staff/Admin | Admin | `OrderStatusChanged` |
+| Accepted | Preparing | Staff/Admin | Admin | `OrderStatusChanged` |
+| Preparing | Ready | Staff/Admin | Admin | `OrderStatusChanged` |
+| Ready | OutForDelivery | Staff/Admin | Admin | `OrderStatusChanged` (Delivery orders only) |
+| Ready / OutForDelivery | Delivered | Staff/Admin | Admin | `OrderStatusChanged` |
+
+Rules that follow from the table:
+
+- **Final statuses:** `Delivered`, `Rejected` and `Cancelled`. An order never leaves them.
+- **Pickup orders** skip `OutForDelivery`. For pickup, `Ready → Delivered` means the customer collected the order.
+- **Delivery orders** go `Ready → OutForDelivery → Delivered`. `Ready → Delivered` is also allowed so staff can fix a missed step.
+- **Accepted must include an ETA** and **Rejected must include a reason**, both sent in `OrderStatusChanged`.
+- **The customer can cancel only while the order is `Placed`.** After that they have to contact the restaurant.
+
+### Source of truth
+
+**The Admin app owns the order status.** The Client app keeps a copy to show the customer. It sets only two statuses itself: `Placed` (when the order is created) and `Cancelled` (while the order is still `Placed`). Every `OrderStatusChanged` from Admin overwrites the Client's copy.
+
+### Race rule: the customer cancels while the restaurant accepts
+
+We use the suggested rule, plus one extra step (step 3):
+
+1. Admin checks every incoming message against the status in **its own database**.
+2. `OrderCancelled` arrives and the order is still `Placed`: Admin sets it to `Cancelled`.
+3. `OrderCancelled` arrives and the order is already `Accepted` or later: Admin **ignores the cancel and logs it** (order id, current status, time). Admin then **sends `OrderStatusChanged` again with the current status** (for example `Accepted` + ETA).
+4. The Client always applies `OrderStatusChanged` from Admin, even if its own copy says `Cancelled`. The customer sees the status go back to `Accepted` with the note: *"The restaurant had already accepted your order, so it could not be cancelled."*
+5. Staff try to accept an order that Admin already set to `Cancelled`: the change is not in the table, so Admin refuses it and shows "Order was cancelled by the customer".
+
+**Why:** only one side can decide, and the restaurant is the side that starts spending money (cooking). Sending the current status again in step 3 means the Client is always corrected, even if the first `Accepted` message reached it before it sent the cancel.
+
+### Other tricky cases
+
+| Case | Rule |
+|---|---|
+| The same message arrives twice | Setting the same status again does nothing. No error. |
+| A message asks for a change not in the table (e.g. `Ready` for a `Cancelled` order) | Ignored and logged as a warning. Status does not change. |
+| Messages reach the Client out of order (e.g. `Preparing` before `Accepted`) | The Client takes whatever Admin sends, because Admin already checked it. The status is correct once all messages arrive. |
+| Online payment, then the order is `Rejected` or `Cancelled` | `PaymentStatus` stays `Paid`, and Admin marks the order as needing a refund. Refunds are done by hand (out of scope). |
+| Cash payment | The order is created as `CashOnDelivery`. Admin sets it to `Paid` when the order becomes `Delivered`. |
+| Online payment | The order is created as `Unpaid` and becomes `Paid` when payment succeeds. Staff should not accept an `Unpaid` online order. |
+
+### Scenario check (on paper)
+
+**1. Normal delivery**
+
+| Step | Change | Who / App | Message | In table? |
+|---|---|---|---|---|
+| Customer orders | (new) → Placed | Customer / Client | OrderPlaced | ✅ |
+| Restaurant accepts | Placed → Accepted + ETA | Staff / Admin | OrderStatusChanged | ✅ |
+| Cooking starts | Accepted → Preparing | Staff / Admin | OrderStatusChanged | ✅ |
+| Food is ready | Preparing → Ready | Staff / Admin | OrderStatusChanged | ✅ |
+| Driver leaves | Ready → OutForDelivery | Staff / Admin | OrderStatusChanged | ✅ (Delivery order) |
+| Customer receives it | OutForDelivery → Delivered | Staff / Admin | OrderStatusChanged | ✅ |
+
+**2. Pickup**
+
+| Step | Change | Who / App | Message | In table? |
+|---|---|---|---|---|
+| Customer orders | (new) → Placed | Customer / Client | OrderPlaced | ✅ |
+| Restaurant accepts | Placed → Accepted + ETA | Staff / Admin | OrderStatusChanged | ✅ |
+| Cooking starts | Accepted → Preparing | Staff / Admin | OrderStatusChanged | ✅ |
+| Food is ready | Preparing → Ready | Staff / Admin | OrderStatusChanged | ✅ |
+| Staff tries "out for delivery" | Ready → OutForDelivery | Staff / Admin | none | ❌ refused (Pickup order) |
+| Customer collects it | Ready → Delivered | Staff / Admin | OrderStatusChanged | ✅ |
+
+**3. Cancel race**
+
+| Time | Admin app | Client app |
+|---|---|---|
+| t0 | Order is `Placed` | Order is `Placed` |
+| t1 | Staff click Accept → `Accepted`, sends OrderStatusChanged(Accepted) | Customer clicks Cancel → `Cancelled`, sends OrderCancelled |
+| t2 | Receives OrderCancelled, order is `Accepted` → ignores it, logs it, sends OrderStatusChanged(Accepted) again | Receives OrderStatusChanged(Accepted) → sets `Accepted`, shows the note |
+| t3 | `Accepted` | `Accepted` ✅ both apps agree |
+
+All three scenarios are covered by the rules above.
