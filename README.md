@@ -82,6 +82,14 @@ When an app starts, the console shows the RabbitMQ settings it is using (never t
 RabbitMQ: localhost:5672, vhost /, exchange food.events, user foodordering
 ```
 
+### Run the tests
+
+```bash
+dotnet test
+```
+
+Run it from the repo root. Tests are in `FoodOrdering.Tests` (xUnit, Moq, FluentAssertions, EF Core InMemory). The test rules are in `CLAUDE.md`.
+
 ### Stop / reset
 
 ```bash
