@@ -22,6 +22,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\docs\messages.md" Link="TestData\messages.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Client.Web\Client.Web.csproj" />
     <ProjectReference Include="..\Admin.Web\Admin.Web.csproj" />
     <ProjectReference Include="..\Shared.Contracts\Shared.Contracts.csproj" />
