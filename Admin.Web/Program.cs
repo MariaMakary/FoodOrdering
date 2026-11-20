@@ -1,3 +1,5 @@
+using Admin.Web.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Shared.Contracts.Options;
 
@@ -13,6 +15,11 @@ builder.Services.AddOptions<RabbitMqOptions>()
     .Validate(o => !string.IsNullOrWhiteSpace(o.Password), "RabbitMq:Password is missing. Set it in user-secrets.")
     .Validate(o => !string.IsNullOrWhiteSpace(o.ExchangeName), "RabbitMq:ExchangeName is missing.")
     .ValidateOnStart();
+
+var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
+    ?? throw new InvalidOperationException("ConnectionStrings:AdminDb is missing. Set it in user-secrets.");
+
+builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(adminDbConnection));
 
 var app = builder.Build();
 

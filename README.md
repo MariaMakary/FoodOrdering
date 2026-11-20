@@ -58,7 +58,7 @@ dotnet user-secrets set "RabbitMq:Username" "<RABBITMQ_DEFAULT_USER>" --project 
 dotnet user-secrets set "RabbitMq:Password" "<RABBITMQ_DEFAULT_PASS>" --project Client.Web
 
 # Admin.Web
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=foodordering_admin;Username=<POSTGRES_USER>;Password=<POSTGRES_PASSWORD>" --project Admin.Web
+dotnet user-secrets set "ConnectionStrings:AdminDb" "Host=localhost;Port=5432;Database=foodordering_admin;Username=<POSTGRES_USER>;Password=<POSTGRES_PASSWORD>" --project Admin.Web
 dotnet user-secrets set "RabbitMq:Username" "<RABBITMQ_DEFAULT_USER>" --project Admin.Web
 dotnet user-secrets set "RabbitMq:Password" "<RABBITMQ_DEFAULT_PASS>" --project Admin.Web
 ```
@@ -67,7 +67,29 @@ See what is stored with `dotnet user-secrets list --project Client.Web`.
 
 If a secret is missing, the app stops at startup with a message like `RabbitMq:Password is missing. Set it in user-secrets.`
 
-### 5. Run the apps
+### 5. Create the database tables
+
+The `dotnet-ef` tool is pinned in `dotnet-tools.json`. Restore it once, then apply the migrations:
+
+```bash
+dotnet tool restore
+dotnet ef database update --project Admin.Web
+```
+
+Run `database update` again whenever someone adds a new migration. To start over with an empty database:
+
+```bash
+dotnet ef database drop --force --project Admin.Web
+dotnet ef database update --project Admin.Web
+```
+
+To add a migration after changing an entity or configuration:
+
+```bash
+dotnet ef migrations add <Name> --project Admin.Web
+```
+
+### 6. Run the apps
 
 In two terminals:
 
@@ -120,7 +142,8 @@ If a setting is in more than one place, the later one wins: `appsettings.json` â
 
 | Setting | Default | Where it comes from | Secret? |
 |---|---|---|---|
-| `ConnectionStrings:DefaultConnection` | none | User-secrets / `ConnectionStrings__DefaultConnection` | Yes |
+| `ConnectionStrings:AdminDb` (Admin.Web) | none | User-secrets / `ConnectionStrings__AdminDb` | Yes |
+| `ConnectionStrings:DefaultConnection` (Client.Web) | none | User-secrets / `ConnectionStrings__DefaultConnection` | Yes |
 | `RabbitMq:Host` | `localhost` | `appsettings.json` | No |
 | `RabbitMq:Port` | `5672` | `appsettings.json` | No |
 | `RabbitMq:VirtualHost` | `/` | `appsettings.json` | No |
