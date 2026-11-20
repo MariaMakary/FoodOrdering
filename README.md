@@ -74,7 +74,29 @@ Both apps run in the `Development` environment, so each one loads `appsettings.D
 
 If a setting is missing, the app stops at startup with a message like `RabbitMq:Password is missing. Set it in appsettings.Development.json.`
 
-### 4. Run the apps
+### 4. Create the database tables
+
+The `dotnet-ef` tool is pinned in `dotnet-tools.json`. Restore it once, then apply the migrations:
+
+```bash
+dotnet tool restore
+dotnet ef database update --project Admin.Web
+```
+
+Run `database update` again whenever someone adds a new migration. To start over with an empty database:
+
+```bash
+dotnet ef database drop --force --project Admin.Web
+dotnet ef database update --project Admin.Web
+```
+
+To add a migration after changing an entity or configuration:
+
+```bash
+dotnet ef migrations add <Name> --project Admin.Web
+```
+
+### 5. Run the apps
 
 In two terminals:
 
