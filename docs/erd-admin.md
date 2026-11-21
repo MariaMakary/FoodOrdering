@@ -18,7 +18,7 @@
 
 | Group | Table | What it stores |
 |---|---|---|
-| Identity | `Users` | Staff logins. Extended with `FullName`, `Phone`, `IsActive`. |
+| Identity | `Users` | Staff logins. Extended with `FirstName`, `LastName`, `IsActive` (`PhoneNumber` is built into Identity). |
 | Identity | `Roles`, `UserRoles` | Roles `Admin`, `Staff`, `Manager` and who has them |
 | Menu | `Category` | Menu categories (Name is unique) |
 | Menu | `MenuItem` | The master menu. Same columns as the Client copy. |
