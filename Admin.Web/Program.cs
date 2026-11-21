@@ -1,20 +1,13 @@
 using Admin.Web.Data;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using Shared.Contracts.Options;
+using Shared.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
-builder.Services.AddOptions<RabbitMqOptions>()
-    .Bind(builder.Configuration.GetSection(RabbitMqOptions.SectionName))
-    .Validate(o => !string.IsNullOrWhiteSpace(o.Host), "RabbitMq:Host is missing.")
-    .Validate(o => !string.IsNullOrWhiteSpace(o.Username), "RabbitMq:Username is missing. Set it in appsettings.Development.json.")
-    .Validate(o => !string.IsNullOrWhiteSpace(o.Password), "RabbitMq:Password is missing. Set it in appsettings.Development.json.")
-    .Validate(o => !string.IsNullOrWhiteSpace(o.ExchangeName), "RabbitMq:ExchangeName is missing.")
-    .ValidateOnStart();
+builder.Services.AddRabbitMq(builder.Configuration);
 
 var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
     ?? throw new InvalidOperationException("ConnectionStrings:AdminDb is missing. Set it in appsettings.Development.json.");
@@ -22,10 +15,6 @@ var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
 builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(adminDbConnection));
 
 var app = builder.Build();
-
-var rabbitMq = app.Services.GetRequiredService<IOptions<RabbitMqOptions>>().Value;
-app.Logger.LogInformation("RabbitMQ: {Host}:{Port}, vhost {VirtualHost}, exchange {Exchange}, user {Username}",
-    rabbitMq.Host, rabbitMq.Port, rabbitMq.VirtualHost, rabbitMq.ExchangeName, rabbitMq.Username);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

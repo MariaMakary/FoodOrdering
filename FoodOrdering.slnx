@@ -4,4 +4,5 @@
   <Project Path="FoodOrdering.IntegrationTests/FoodOrdering.IntegrationTests.csproj" />
   <Project Path="FoodOrdering.UnitTests/FoodOrdering.UnitTests.csproj" />
   <Project Path="Shared.Contracts/Shared.Contracts.csproj" />
+  <Project Path="Shared.Messaging/Shared.Messaging.csproj" />
 </Solution>

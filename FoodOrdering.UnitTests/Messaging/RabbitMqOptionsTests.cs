@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Configuration;
-using Shared.Contracts.Options;
+using Shared.Messaging;
 using Shouldly;
 
-namespace FoodOrdering.UnitTests.Contracts;
+namespace FoodOrdering.UnitTests.Messaging;
 
 public class RabbitMqOptionsTests
 {

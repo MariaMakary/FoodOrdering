@@ -1,6 +1,12 @@
 # FoodOrdering
 
-Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ, with shared code in `Shared.Contracts` and tests in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`. See `README.md` to run locally and `docs/` for the decisions log and message format.
+Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ. Shared code is split in two: `Shared.Contracts` holds plain classes only (messages, enums, JSON options, routing keys and queue names), and `Shared.Messaging` holds the RabbitMQ code (connection, topology, `AddRabbitMq`). Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`. See `README.md` to run locally and `docs/` for the decisions log and message format.
+
+## Messaging
+
+- Never add a RabbitMQ dependency to `Shared.Contracts`. RabbitMQ code goes in `Shared.Messaging`.
+- Use the one `RabbitMqConnection` per app (`await connection.CreateChannelAsync()`). Never create a new `ConnectionFactory` or connection elsewhere.
+- Never type exchange, queue or routing key names by hand: use `RoutingKeys`, `QueueNames` and `RabbitMqTopology`.
 
 ## Tests
 
@@ -16,7 +22,8 @@ Fast tests with no database, no RabbitMQ and no Docker. Put each test in the fol
 
 | Folder | Tests for |
 |---|---|
-| `Contracts/` | `Shared.Contracts` (messages, enums, options, JSON) |
+| `Contracts/` | `Shared.Contracts` (messages, enums, JSON) |
+| `Messaging/` | `Shared.Messaging` (options, topology) with a substituted `IChannel` |
 | `Client/Consumers/` | RabbitMQ consumers in Client.Web |
 | `Client/Services/` | Services in Client.Web |
 | `Admin/Consumers/` | RabbitMQ consumers in Admin.Web |
@@ -25,14 +32,15 @@ Fast tests with no database, no RabbitMQ and no Docker. Put each test in the fol
 
 ### Integration tests: `FoodOrdering.IntegrationTests`
 
-Tests that need a real PostgreSQL, for example foreign keys, unique indexes, duplicate-message checks or anything saved by EF Core. Testcontainers starts a throwaway `postgres:16` container for the test run, so the `docker-compose.yml` containers and your dev data are never touched.
+Tests that need a real PostgreSQL or RabbitMQ, for example foreign keys, unique indexes, duplicate-message checks, anything saved by EF Core, or queues that must really exist. Testcontainers starts throwaway `postgres:16` and `rabbitmq:3-management` containers for the test run, so the `docker-compose.yml` containers and your dev data are never touched.
 
 | Folder | Tests for |
 |---|---|
 | `Client/` | Database code in Client.Web |
 | `Admin/` | Database code in Admin.Web |
-| `Infrastructure/` | The test setup itself (`PostgresFixture`) |
+| `Messaging/` | `Shared.Messaging` against a real RabbitMQ |
+| `Infrastructure/` | The test setup itself (`PostgresFixture`, `RabbitMqFixture`) |
 
-- Mark the test class with `[Collection(PostgresCollection.Name)]` and take `PostgresFixture` in the constructor.
-- Call `await postgres.CreateDbContextAsync<AdminDbContext>()` (or `ClientDbContext`) in each test. Every call creates a new empty database, so tests never share data.
+- **Database tests:** mark the class with `[Collection(PostgresCollection.Name)]` and take `PostgresFixture` in the constructor. Call `await postgres.CreateDbContextAsync<AdminDbContext>()` (or `ClientDbContext`) in each test. Every call creates a new empty database, so tests never share data.
+- **RabbitMQ tests:** mark the class with `[Collection(RabbitMqCollection.Name)]`, take `RabbitMqFixture` in the constructor, and use `rabbitMq.CreateHost()` to get a host wired with `AddRabbitMq` against the test container.
 - Don't use EF Core InMemory: it doesn't enforce foreign keys or unique indexes, so tests pass that would fail on the real database.

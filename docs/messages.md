@@ -15,6 +15,26 @@ How Client.Web and Admin.Web talk to each other. Both apps must follow this docu
 | `OrderStatusChanged` | Admin | Client | Staff change an order's status |
 | `MenuItemUpdated` | Admin | Client | Staff create, edit or delete a menu item |
 
+## Exchange, routing keys and queues (UNI-11)
+
+All messages go through **one durable topic exchange: `food.events`**. The publisher sends each message to the exchange with its routing key. The exchange copies it into every queue bound to that key. Why topic: see [DEC-002](decisions-log.md).
+
+| Message | Direction | Routing key | Queue (durable) | Consumed by |
+|---|---|---|---|---|
+| `OrderPlaced` | Client → Admin | `order.placed` | `admin.order-placed` | Admin |
+| `PaymentCompleted` | Client → Admin | `payment.completed` | `admin.payment-completed` | Admin |
+| `OrderCancelled` | Client → Admin | `order.cancelled` | `admin.order-cancelled` | Admin |
+| `DishRated` | Client → Admin | `dish.rated` | `admin.dish-rated` | Admin |
+| `OrderStatusChanged` | Admin → Client | `order.status.changed` | `client.order-status-changed` | Client |
+| `MenuItemUpdated` | Admin → Client | `menu.item.updated` | `client.menu-item-updated` | Client |
+
+- **Naming:** routing keys are `<subject>.<event>` with dots (dots are what topic wildcards split on). Queues are `<receiving app>.<message>`, so the prefix shows who reads it.
+- **In code:** never type these names by hand. Use `RoutingKeys` and `QueueNames` in `Shared.Contracts/Messaging`, and `RabbitMqTopology.Bindings` in `Shared.Messaging`. `RabbitMqTopology.RoutingKeyFor(typeof(OrderPlaced))` gives the key for a message.
+- **Setup:** both apps call `builder.Services.AddRabbitMq(...)`, which runs `RabbitMqTopology.DeclareAsync` at startup. It creates the exchange, the 6 queues and their bindings. Declaring something that already exists with the same settings does nothing, so it is safe to run every time and in both apps. If RabbitMQ is not reachable yet, it retries `RabbitMq:RetryCount` times (2s, 4s, 8s) before the app stops.
+- **Durable** exchange and queues survive a RabbitMQ restart. Messages also survive when they are published as persistent (UNI-12).
+- **Dead letters:** queue arguments are created in one place (`QueueArguments()`), where UNI-17 adds `x-dead-letter-exchange`.
+- **Check it:** http://localhost:15672 → **Exchanges** → `food.events` → **Bindings**.
+
 ## Rules for every message
 
 ### Base class: `MessageBase`

@@ -165,7 +165,7 @@ If a setting is in more than one place, the later one wins: `appsettings.json` â
 | `RabbitMq:Username` | both | none | `appsettings.Development.json` / `RabbitMq__Username` | Yes |
 | `RabbitMq:Password` | both | none | `appsettings.Development.json` / `RabbitMq__Password` | Yes |
 
-The `RabbitMq` section is read into `Shared.Contracts.Options.RabbitMqOptions`. Use it in a class by injecting `IOptions<RabbitMqOptions>`.
+The `RabbitMq` section is read into `Shared.Messaging.RabbitMqOptions` by `builder.Services.AddRabbitMq(builder.Configuration)` in each app's `Program.cs`. Use it in a class by injecting `IOptions<RabbitMqOptions>`.
 
 Stripe (UNI-75) and AI (UNI-34) settings will be added here with their own options classes when those tickets are done.
 

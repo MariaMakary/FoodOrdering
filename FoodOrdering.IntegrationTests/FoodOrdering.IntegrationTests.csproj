@@ -14,6 +14,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.17.0" />
+    <PackageReference Include="Testcontainers.RabbitMq" Version="4.17.0" />
     <PackageReference Include="Shouldly" Version="4.2.1" />
   </ItemGroup>
 
@@ -21,6 +22,7 @@
     <ProjectReference Include="..\Client.Web\Client.Web.csproj" />
     <ProjectReference Include="..\Admin.Web\Admin.Web.csproj" />
     <ProjectReference Include="..\Shared.Contracts\Shared.Contracts.csproj" />
+    <ProjectReference Include="..\Shared.Messaging\Shared.Messaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>

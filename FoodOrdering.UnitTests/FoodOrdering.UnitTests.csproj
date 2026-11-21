@@ -24,6 +24,7 @@
     <ProjectReference Include="..\Client.Web\Client.Web.csproj" />
     <ProjectReference Include="..\Admin.Web\Admin.Web.csproj" />
     <ProjectReference Include="..\Shared.Contracts\Shared.Contracts.csproj" />
+    <ProjectReference Include="..\Shared.Messaging\Shared.Messaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>
