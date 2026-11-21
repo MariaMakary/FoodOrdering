@@ -111,7 +111,7 @@ All three scenarios are covered by the rules above.
 
 **Date:** 2026-11-21
 **Related tickets:** UNI-10 (contracts), UNI-12 (publisher), UNI-17 (dead letters)
-**Code:** `Shared.Contracts/Messaging/` (`RoutingKeys`, `QueueNames`, `RabbitMqTopology`)
+**Code:** `Shared.Contracts/Messaging/` (`RoutingKeys`, `QueueNames`) and `Shared.Messaging/` (`RabbitMqTopology`, `RabbitMqConnection`, `AddRabbitMq`)
 **Details:** the full table of routing keys and queues is in [messages.md](messages.md#exchange-routing-keys-and-queues-uni-11)
 
 ### Decision
@@ -142,6 +142,18 @@ Today every binding is an exact key, so topic behaves exactly like direct. Choos
 - A problem with one message (for example `DishRated` failing) does not block the others, and the Management UI shows how many of each message are waiting.
 - Failed messages are easy to find per type once dead-lettering is added (UNI-17).
 
+### Messages about the same order can arrive out of order
+
+RabbitMQ keeps order only inside one queue. Each queue has its own consumer, so `PaymentCompleted` or `OrderCancelled` can be processed before the `OrderPlaced` of the same order, and Admin can't save a payment or a cancel for an order it doesn't have yet (foreign key to `Orders`).
+
+**Rule:** when a consumer receives a message for an order that doesn't exist yet, it retries the message (5 attempts, about 200 ms apart) before rejecting it to the dead-letter queue (UNI-17). The Client's `OrderStatusChanged` consumer ignores a message whose `changedAt` is older than the last one it applied for that order, so an older status never overwrites a newer one.
+
 ### Why both apps declare everything
 
 Declaring an exchange or queue that already exists with the same settings does nothing. So both apps run the same `RabbitMqTopology.DeclareAsync` at startup, and it does not matter which app starts first: a message published before the other app ever ran still lands in a durable queue and waits.
+
+### Code layout and connections
+
+- **`Shared.Contracts`** holds only plain classes: messages, enums, `JsonOptions`, `RoutingKeys`, `QueueNames`. It has no RabbitMQ dependency, so anything can reference it.
+- **`Shared.Messaging`** holds the RabbitMQ code. Each app calls `builder.Services.AddRabbitMq(builder.Configuration)`, which validates the settings, registers one `RabbitMqConnection` and declares the topology at startup (`RabbitMqTopologyInitializer`).
+- **One connection per app, many channels.** RabbitMQ connections are expensive TCP connections, channels are cheap. `RabbitMqConnection` opens the connection once, shares it for the whole app, and hands out channels with `CreateChannelAsync`. The connection is named after the app (`Client.Web`, `Admin.Web`), so the Management UI shows who is connected.

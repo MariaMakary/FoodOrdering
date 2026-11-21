@@ -1,9 +1,8 @@
 using RabbitMQ.Client;
-using RabbitMQ.Client.Exceptions;
 using Shared.Contracts.Messages;
-using Shared.Contracts.Options;
+using Shared.Contracts.Messaging;
 
-namespace Shared.Contracts.Messaging;
+namespace Shared.Messaging;
 
 public sealed record QueueBinding(Type MessageType, string RoutingKey, string Queue);
 
@@ -33,7 +32,7 @@ public static class RabbitMqTopology
             arguments: null,
             cancellationToken: ct);
 
-        foreach (var binding in Bindings)
+        foreach (QueueBinding binding in Bindings)
         {
             await channel.QueueDeclareAsync(
                 queue: binding.Queue,
@@ -48,35 +47,6 @@ public static class RabbitMqTopology
                 exchange: exchangeName,
                 routingKey: binding.RoutingKey,
                 cancellationToken: ct);
-        }
-    }
-
-    public static async Task DeclareAsync(RabbitMqOptions options, CancellationToken ct = default)
-    {
-        var factory = new ConnectionFactory
-        {
-            HostName = options.Host,
-            Port = options.Port,
-            UserName = options.Username,
-            Password = options.Password,
-            VirtualHost = options.VirtualHost
-        };
-
-        var attempt = 0;
-        while (true)
-        {
-            try
-            {
-                await using var connection = await factory.CreateConnectionAsync("topology-setup", ct);
-                await using var channel = await connection.CreateChannelAsync(cancellationToken: ct);
-                await DeclareAsync(channel, options.ExchangeName, ct);
-                return;
-            }
-            catch (BrokerUnreachableException) when (attempt < options.RetryCount)
-            {
-                attempt++;
-                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), ct);
-            }
         }
     }
 
