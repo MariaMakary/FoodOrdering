@@ -6,7 +6,9 @@
 
 ## Rules
 
-- **All Ids are `Guid`**, except ASP.NET Identity tables, which keep Identity's default `string` Id.
+- **All Ids are `Guid`, including Identity.** Users and roles use `IdentityUser<Guid>` and `IdentityRole<Guid>`, and the context is `IdentityDbContext<ApplicationUser, ApplicationRole, Guid>`.
+- **Identity tables drop the `AspNet` prefix:** `Users`, `Roles`, `UserRoles`, `UserClaims`, `UserLogins`, `UserTokens`, `RoleClaims` (renamed in `OnModelCreating`).
+- **`Order` uses optimistic concurrency.** PostgreSQL's built-in `xmin` row version is the concurrency token. If two changes to the same order are saved at the same time (staff accepting while `OrderCancelled` is processed, or two staff at once), the second save throws `DbUpdateConcurrencyException`, reloads the order and checks the DEC-001 rules again.
 - **No foreign keys to the Client database.** `Order.Id` is the same Guid the Client created, and `CustomerId` is a plain value copied from `OrderPlaced`.
 - **Money** is `decimal(10,2)`. **Times** are UTC.
 - **Enums** (`OrderStatus`, `PaymentStatus`, `DeliveryType`, `PaymentMethod`) are stored as strings, the same as in the messages.
@@ -16,12 +18,12 @@
 
 | Group | Table | What it stores |
 |---|---|---|
-| Identity | `AspNetUsers` | Staff logins. Extended with `FullName`, `Phone`, `IsActive`. |
-| Identity | `AspNetRoles`, `AspNetUserRoles` | Roles `Admin`, `Staff`, `Manager` and who has them |
+| Identity | `Users` | Staff logins. Extended with `FullName`, `Phone`, `IsActive`. |
+| Identity | `Roles`, `UserRoles` | Roles `Admin`, `Staff`, `Manager` and who has them |
 | Menu | `Category` | Menu categories (Name is unique) |
 | Menu | `MenuItem` | The master menu. Same columns as the Client copy. |
 | Menu | `MenuItemExtra` | Extras a dish can have (cheese, bacon, ...) |
-| Orders | `Order` | One row per order, copied from `OrderPlaced`, then updated by staff |
+| Orders | `Order` | One row per order, copied from `OrderPlaced`, then updated by staff. `xmin` protects it from two changes at once. |
 | Orders | `OrderItem`, `OrderItemExtra` | Dishes and extras in the order, with name and price **at the time of ordering** |
 | Orders | `OrderStatusHistory` | Every status change: who, when and why. `ChangedByUserId` is `null` when the customer cancelled. |
 | Orders | `Payment` | Online payment from `PaymentCompleted`. At most one per order. |
@@ -126,7 +128,7 @@ The message is saved in `OutboxMessage` in the same transaction as the status ch
 
 ## Points to review with Maria
 
-1. Ids are Guids everywhere, and Identity stays `string`. The Client ERD (UNI-54) should match for `MenuItem`, `MenuItemExtra` and `Category`.
+1. Ids are Guids everywhere, including Identity (`IdentityUser<Guid>`). The Client ERD (UNI-54) must match: its customers are `IdentityUser<Guid>` too, so `customerId` in `OrderPlaced` is a real Guid.
 2. `OrderItem.MenuItemId` and `Rating.MenuItemId` are real foreign keys to `MenuItem` (same database), which is why menu items are soft-deleted.
 3. A rejection reason or cancel reason is stored in `OrderStatusHistory.Note`, not on `Order`.
 4. `Payment.OrderId` is unique: one online payment per order.
