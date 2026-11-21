@@ -11,13 +11,17 @@ public class OrderStatusHistoryConfiguration : IEntityTypeConfiguration<OrderSta
         builder.ToTable("OrderStatusHistory");
 
         builder.HasKey(h => h.Id);
-        builder.Property(h => h.ChangedByUserId).HasMaxLength(450);
         builder.Property(h => h.Note).HasMaxLength(500);
 
         builder.HasOne(h => h.Order)
             .WithMany(o => o.StatusHistory)
             .HasForeignKey(h => h.OrderId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(h => h.ChangedByUser)
+            .WithMany()
+            .HasForeignKey(h => h.ChangedByUserId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasIndex(h => new { h.OrderId, h.ChangedAt });
     }

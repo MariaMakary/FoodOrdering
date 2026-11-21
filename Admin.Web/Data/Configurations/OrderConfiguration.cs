@@ -16,6 +16,10 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(o => o.CustomerPhone).HasMaxLength(30).IsRequired();
         builder.Property(o => o.Address).HasMaxLength(500);
         builder.Property(o => o.Notes).HasMaxLength(1000);
+        builder.Property<uint>("xmin")
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
 
         builder.HasIndex(o => o.OrderNumber).IsUnique();
         builder.HasIndex(o => o.Status);

@@ -1,11 +1,15 @@
 using Admin.Web.Models.Entities;
 using Admin.Web.Models.Enums;
+using Admin.Web.Models.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Shared.Contracts.Enums;
 
 namespace Admin.Web.Data;
 
-public class AdminDbContext(DbContextOptions<AdminDbContext> options) : DbContext(options)
+public class AdminDbContext(DbContextOptions<AdminDbContext> options)
+    : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>(options)
 {
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<MenuItem> MenuItems => Set<MenuItem>();
@@ -21,6 +25,16 @@ public class AdminDbContext(DbContextOptions<AdminDbContext> options) : DbContex
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<ApplicationUser>().ToTable("Users");
+        modelBuilder.Entity<ApplicationRole>().ToTable("Roles");
+        modelBuilder.Entity<IdentityUserRole<Guid>>().ToTable("UserRoles");
+        modelBuilder.Entity<IdentityUserClaim<Guid>>().ToTable("UserClaims");
+        modelBuilder.Entity<IdentityUserLogin<Guid>>().ToTable("UserLogins");
+        modelBuilder.Entity<IdentityUserToken<Guid>>().ToTable("UserTokens");
+        modelBuilder.Entity<IdentityRoleClaim<Guid>>().ToTable("RoleClaims");
+
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AdminDbContext).Assembly);
     }
 

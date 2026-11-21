@@ -13,19 +13,33 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task<TContext> CreateDbContextAsync<TContext>() where TContext : DbContext
     {
-        var connectionString = new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString())
-        {
-            Database = $"test_{Guid.NewGuid():N}"
-        }.ConnectionString;
+        TContext context = NewDbContext<TContext>(NewDatabaseConnectionString());
+        await context.Database.EnsureCreatedAsync();
+        return context;
+    }
 
+    public async Task<string> CreateMigratedDatabaseAsync<TContext>() where TContext : DbContext
+    {
+        string connectionString = NewDatabaseConnectionString();
+        await using TContext context = NewDbContext<TContext>(connectionString);
+        await context.Database.MigrateAsync();
+        return connectionString;
+    }
+
+    public TContext NewDbContext<TContext>(string connectionString) where TContext : DbContext
+    {
         DbContextOptions<TContext> options = new DbContextOptionsBuilder<TContext>()
             .UseNpgsql(connectionString)
             .Options;
 
-        var context = (TContext)Activator.CreateInstance(typeof(TContext), options)!;
-        await context.Database.EnsureCreatedAsync();
-        return context;
+        return (TContext)Activator.CreateInstance(typeof(TContext), options)!;
     }
+
+    private string NewDatabaseConnectionString() =>
+        new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString())
+        {
+            Database = $"test_{Guid.NewGuid():N}"
+        }.ConnectionString;
 
     public Task InitializeAsync() => _postgres.StartAsync();
 

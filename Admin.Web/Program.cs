@@ -17,7 +17,7 @@ builder.Services.AddOptions<RabbitMqOptions>()
     .ValidateOnStart();
 
 var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
-    ?? throw new InvalidOperationException("ConnectionStrings:AdminDb is missing. Set it in user-secrets.");
+    ?? throw new InvalidOperationException("ConnectionStrings:AdminDb is missing. Set it in appsettings.Development.json.");
 
 builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(adminDbConnection));
 
