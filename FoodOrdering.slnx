@@ -1,5 +1,7 @@
 <Solution>
   <Project Path="Admin.Web/Admin.Web.csproj" />
   <Project Path="Client.Web/Client.Web.csproj" />
+  <Project Path="FoodOrdering.IntegrationTests/FoodOrdering.IntegrationTests.csproj" />
+  <Project Path="FoodOrdering.UnitTests/FoodOrdering.UnitTests.csproj" />
   <Project Path="Shared.Contracts/Shared.Contracts.csproj" />
 </Solution>

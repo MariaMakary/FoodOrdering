@@ -89,6 +89,21 @@ When an app starts, the console shows the RabbitMQ settings it is using (never t
 RabbitMQ: localhost:5672, vhost /, exchange food.events, user guest
 ```
 
+### Run the tests
+
+```bash
+dotnet test
+```
+
+Run it from the repo root with Docker Desktop running. There are two test projects:
+
+| Project | What | Needs Docker? |
+|---|---|---|
+| `FoodOrdering.UnitTests` | Fast tests with no database (xUnit, NSubstitute, Shouldly) | No |
+| `FoodOrdering.IntegrationTests` | Tests against a real PostgreSQL that Testcontainers starts and removes automatically | Yes |
+
+The integration tests use their own throwaway container, not the ones from `docker-compose.yml`, so your dev data is never touched. To run only one project: `dotnet test FoodOrdering.UnitTests`. The test rules are in `CLAUDE.md`.
+
 ### Stop / reset
 
 ```bash
