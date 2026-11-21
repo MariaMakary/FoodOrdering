@@ -21,6 +21,7 @@ Fast tests with no database, no RabbitMQ and no Docker. Put each test in the fol
 | `Client/Services/` | Services in Client.Web |
 | `Admin/Consumers/` | RabbitMQ consumers in Admin.Web |
 | `Admin/Services/` | Services in Admin.Web |
+| `Helpers/` | Shared test helpers, e.g. `MessageExamples` (reads the JSON examples from `docs/messages.md`) |
 
 ### Integration tests: `FoodOrdering.IntegrationTests`
 
