@@ -1,0 +1,62 @@
+name: foodordering
+
+services:
+  client-postgres:
+    image: postgres:16
+    container_name: foodordering-client-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: foodordering_client
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - client-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d foodordering_client"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  admin-postgres:
+    image: postgres:16
+    container_name: foodordering-admin-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: foodordering_admin
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - admin-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d foodordering_admin"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: foodordering-rabbitmq
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+volumes:
+  client-postgres-data:
+  admin-postgres-data:
+  rabbitmq-data:
