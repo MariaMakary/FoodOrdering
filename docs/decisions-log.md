@@ -104,3 +104,44 @@ We use the suggested rule, plus one extra step (step 3):
 | t3 | `Accepted` | `Accepted` ✅ both apps agree |
 
 All three scenarios are covered by the rules above.
+
+---
+
+## DEC-002: One topic exchange for all messages (UNI-11)
+
+**Date:** 2026-11-21
+**Related tickets:** UNI-10 (contracts), UNI-12 (publisher), UNI-17 (dead letters)
+**Code:** `Shared.Contracts/Messaging/` (`RoutingKeys`, `QueueNames`, `RabbitMqTopology`)
+**Details:** the full table of routing keys and queues is in [messages.md](messages.md#exchange-routing-keys-and-queues-uni-11)
+
+### Decision
+
+- **One exchange, `food.events`, of type `topic`, durable.** Both apps publish every message to it.
+- **One durable queue per message type**, named after the app that reads it (`admin.order-placed`, `client.order-status-changed`, ...).
+- **Routing keys** are `<subject>.<event>` with dots: `order.placed`, `order.status.changed`, `menu.item.updated`.
+
+### Why a topic exchange and not a direct one
+
+| | Direct | Topic (chosen) |
+|---|---|---|
+| How a queue is matched | Routing key must be **exactly** equal | Exact match **or** wildcards: `*` = one word, `#` = any number of words |
+| Our 6 messages today | Works | Works the same way |
+| Adding a listener for a whole group later | One binding per key, and a new binding every time a key is added | One binding: `order.#` gets every order message, including future ones |
+| A queue that logs or audits everything | Bind all 6 keys by hand | One binding: `#` |
+
+Today every binding is an exact key, so topic behaves exactly like direct. Choosing topic costs nothing now and keeps the door open, for example for a monitoring queue or a notification service that wants `order.#` without touching the publisher.
+
+### Why one exchange and not one per app or per message
+
+- The publisher always sends to the same place, `food.events`, and only changes the routing key. Adding a message never needs a new exchange.
+- Which app gets which message is decided only by the bindings, so it is all visible on one page in the Management UI.
+
+### Why one queue per message type and not one queue per app
+
+- Each consumer handles one message type, so it always knows which class to read and can be tested alone.
+- A problem with one message (for example `DishRated` failing) does not block the others, and the Management UI shows how many of each message are waiting.
+- Failed messages are easy to find per type once dead-lettering is added (UNI-17).
+
+### Why both apps declare everything
+
+Declaring an exchange or queue that already exists with the same settings does nothing. So both apps run the same `RabbitMqTopology.DeclareAsync` at startup, and it does not matter which app starts first: a message published before the other app ever ran still lands in a durable queue and waits.

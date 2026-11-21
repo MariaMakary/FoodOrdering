@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Shared.Contracts.Messaging;
 using Shared.Contracts.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +20,10 @@ var app = builder.Build();
 var rabbitMq = app.Services.GetRequiredService<IOptions<RabbitMqOptions>>().Value;
 app.Logger.LogInformation("RabbitMQ: {Host}:{Port}, vhost {VirtualHost}, exchange {Exchange}, user {Username}",
     rabbitMq.Host, rabbitMq.Port, rabbitMq.VirtualHost, rabbitMq.ExchangeName, rabbitMq.Username);
+
+await RabbitMqTopology.DeclareAsync(rabbitMq);
+app.Logger.LogInformation("RabbitMQ topology declared: exchange {Exchange} with {QueueCount} queues",
+    rabbitMq.ExchangeName, RabbitMqTopology.Bindings.Count);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
