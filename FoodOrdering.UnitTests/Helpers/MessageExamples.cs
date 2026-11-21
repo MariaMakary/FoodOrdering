@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace FoodOrdering.Tests.Helpers;
+namespace FoodOrdering.UnitTests.Helpers;
 
 public static partial class MessageExamples
 {
@@ -12,13 +12,13 @@ public static partial class MessageExamples
 
     private static IReadOnlyList<(string, string)> Load()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "TestData", "messages.md");
-        var markdown = File.ReadAllText(path);
+        string path = Path.Combine(AppContext.BaseDirectory, "TestData", "messages.md");
+        string markdown = File.ReadAllText(path);
         var examples = new List<(string, string)>();
 
         foreach (Match section in SectionRegex().Matches(markdown))
         {
-            var messageType = section.Groups["type"].Value;
+            string messageType = section.Groups["type"].Value;
             foreach (Match block in JsonBlockRegex().Matches(section.Groups["body"].Value))
             {
                 examples.Add((messageType, block.Groups["json"].Value));
