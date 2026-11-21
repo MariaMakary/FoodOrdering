@@ -8,66 +8,71 @@ Two ASP.NET Core MVC apps that talk to each other through RabbitMQ:
 | `Admin.Web` | Restaurant app: accept, prepare and deliver orders |
 | `Shared.Contracts` | Message contracts and enums shared by both apps |
 
-Each app has its own PostgreSQL database (`foodordering_client`, `foodordering_admin`).
+Each app has its own PostgreSQL container and database (`foodordering_client`, `foodordering_admin`).
 
 ## Run locally
 
 ### 1. Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
-- .NET SDK **10.0.404** or a newer 10.0 feature band. The version is pinned in `global.json`. Check with `dotnet --version`.
+- Any .NET 10 SDK (`global.json` requires 10.0.100 or newer). Check with `dotnet --version`.
 
-### 2. Create your `.env`
-
-```powershell
-Copy-Item .env.example .env   # Windows PowerShell
-# cp .env.example .env        # macOS / Linux / Git Bash
-```
-
-Open `.env` and fill in a username and password for PostgreSQL and RabbitMQ. `.env` is git-ignored, so never commit it.
-
-### 3. Start PostgreSQL and RabbitMQ
+### 2. Start PostgreSQL and RabbitMQ
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d
-docker compose -f docker-compose.dev.yml ps      # both should show "healthy"
+docker compose up -d
+docker compose ps      # all three should show "healthy"
 ```
-
-On first start, `docker/init-db.sql` creates the `foodordering_client` and `foodordering_admin` databases.
 
 | Service | Address | Login |
 |---|---|---|
-| PostgreSQL | `localhost:5432` | `POSTGRES_USER` / `POSTGRES_PASSWORD` from `.env` |
-| RabbitMQ (AMQP) | `localhost:5672` | `RABBITMQ_DEFAULT_USER` / `RABBITMQ_DEFAULT_PASS` from `.env` |
-| RabbitMQ Management UI | http://localhost:15672 | same as above |
+| PostgreSQL (Client.Web, `foodordering_client`) | `localhost:5432` | `postgres` / `postgres` |
+| PostgreSQL (Admin.Web, `foodordering_admin`) | `localhost:5433` | `postgres` / `postgres` |
+| RabbitMQ (AMQP) | `localhost:5672` | `guest` / `guest` |
+| RabbitMQ Management UI | http://localhost:15672 | `guest` / `guest` |
+
+These are dev-only credentials for containers on your own machine.
 
 Check that both databases exist:
 
 ```bash
-docker exec -it foodordering-postgres psql -U <POSTGRES_USER> -c "\l"
+docker exec -it foodordering-client-postgres psql -U postgres -c "\l"
+docker exec -it foodordering-admin-postgres psql -U postgres -c "\l"
 ```
 
-### 4. Store connection settings in user-secrets
+### 3. Create `appsettings.Development.json` in each app
 
-Both apps already have user-secrets set up (`UserSecretsId` is in each `.csproj`). Put **the same values you used in `.env`** in each app's secrets:
+Both apps run in the `Development` environment, so each one loads `appsettings.Development.json` on top of `appsettings.json`. The file is git-ignored, so it's yours to change.
 
-```bash
-# Client.Web
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=foodordering_client;Username=<POSTGRES_USER>;Password=<POSTGRES_PASSWORD>" --project Client.Web
-dotnet user-secrets set "RabbitMQ:Host" "localhost" --project Client.Web
-dotnet user-secrets set "RabbitMQ:Username" "<RABBITMQ_DEFAULT_USER>" --project Client.Web
-dotnet user-secrets set "RabbitMQ:Password" "<RABBITMQ_DEFAULT_PASS>" --project Client.Web
+`Client.Web/appsettings.Development.json`:
 
-# Admin.Web
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=foodordering_admin;Username=<POSTGRES_USER>;Password=<POSTGRES_PASSWORD>" --project Admin.Web
-dotnet user-secrets set "RabbitMQ:Host" "localhost" --project Admin.Web
-dotnet user-secrets set "RabbitMQ:Username" "<RABBITMQ_DEFAULT_USER>" --project Admin.Web
-dotnet user-secrets set "RabbitMQ:Password" "<RABBITMQ_DEFAULT_PASS>" --project Admin.Web
+```json
+{
+  "ConnectionStrings": {
+    "ClientDb": "Host=localhost;Port=5432;Database=foodordering_client;Username=postgres;Password=postgres"
+  },
+  "RabbitMq": {
+    "Username": "guest",
+    "Password": "guest"
+  }
+}
 ```
 
-See what is stored with `dotnet user-secrets list --project Client.Web`.
+`Admin.Web/appsettings.Development.json`:
 
-### 5. Run the apps
+```json
+{
+  "ConnectionStrings": {
+    "AdminDb": "Host=localhost;Port=5433;Database=foodordering_admin;Username=postgres;Password=postgres"
+  },
+  "RabbitMq": {
+    "Username": "guest",
+    "Password": "guest"
+  }
+}
+```
+
+### 4. Run the apps
 
 In two terminals:
 
@@ -79,13 +84,12 @@ dotnet run --project Admin.Web
 ### Stop / reset
 
 ```bash
-docker compose -f docker-compose.dev.yml stop      # stop, keep data
-docker compose -f docker-compose.dev.yml down      # remove containers, keep data
-docker compose -f docker-compose.dev.yml down -v   # remove containers AND data (databases are recreated on next up)
+docker compose stop      # stop, keep data
+docker compose down      # remove containers, keep data
+docker compose down -v   # remove containers AND data (databases are recreated on next up)
 ```
 
 ### Troubleshooting
 
-- **`Set POSTGRES_USER in .env`**: you have no `.env` file, or a value in it is empty. See step 2.
-- **Port 5432 / 5672 / 15672 already in use**: another PostgreSQL or RabbitMQ is running on your machine. Stop it, or change the left side of the port mapping in `docker-compose.dev.yml`.
-- **Databases missing after changing `init-db.sql`**: the script only runs when the data volume is empty. Run `down -v`, then `up -d`.
+- **Port 5432 / 5433 / 5672 / 15672 already in use**: another PostgreSQL or RabbitMQ is running on your machine. Stop it, or change the left side of the port mapping in `docker-compose.yml`.
+- **Connection string or RabbitMQ settings missing**: check that `appsettings.Development.json` exists in the app's folder and the app runs with `ASPNETCORE_ENVIRONMENT=Development` (the default in `launchSettings.json`).
