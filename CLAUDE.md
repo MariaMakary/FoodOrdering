@@ -1,6 +1,20 @@
 # FoodOrdering
 
-Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ. Shared code is split in three: `Shared.Contracts` holds plain classes only (messages, enums, JSON options, routing keys and queue names), `Shared.Messaging` holds the RabbitMQ code (connection, topology, `AddRabbitMq`), and `Shared.Persistence` holds the EF Core code both apps use (`IAuditable`, `AuditInterceptor`). Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`. See `README.md` to run locally and `docs/` for the decisions log and message format.
+Two ASP.NET Core MVC apps: `Client.Web` (customers order, pay, cancel and rate) and `Admin.Web` (the restaurant manages the menu and the kitchen). Each app has its own PostgreSQL database (`foodordering_client`, `foodordering_admin`). **The apps never call each other or read each other's database.** Data moves only through RabbitMQ messages.
+
+Shared code is split in three:
+
+| Project | Holds | Depends on |
+|---|---|---|
+| `Shared.Contracts` | Plain classes only: messages, enums, JSON options, routing keys and queue names | nothing |
+| `Shared.Messaging` | RabbitMQ code: connection, topology, `AddRabbitMq` | `Shared.Contracts`, RabbitMQ.Client |
+| `Shared.Persistence` | EF Core code both apps use: `AuditableEntity`, `IAuditable`, `AuditInterceptor`, `MigrateDatabaseAsync` | EF Core |
+
+Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`.
+
+## How to run
+
+Follow [README.md](README.md): `docker compose up -d`, create `appsettings.Development.json` in each app, `dotnet tool restore`, then `dotnet run`. Secrets go only in the git-ignored `appsettings.Development.json`. We don't use `dotnet user-secrets` or `.env` files.
 
 ## Folder layout
 
@@ -23,19 +37,103 @@ Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ
 - Register every service and repository in `ServiceExtensions.cs` (`AddClientServices()` / `AddAdminServices()`), not in `Program.cs`. Use `AddScoped`, the same lifetime as the `DbContext`.
 - `IExampleService` and `IExampleRepository` only show the pattern. Delete them in the PR that adds the first real service.
 
+## Code rules
+
+- **Async all the way:** every method that touches the database, RabbitMQ or HTTP is `async`, ends in `Async`, and takes a `CancellationToken`. Never call `.Result` or `.Wait()`.
+- **Controllers only call services.** Services only call repositories. A controller never uses a `DbContext`, and a service never builds an EF query.
+- **Views get ViewModels, never entities.** A form binds to an input ViewModel, never to an entity, so a user can't post fields they shouldn't set (`Status`, `Total`).
+- **Depend on interfaces.** Classes ask for `IOrderService`, not `OrderService`, and get it through constructor injection.
+- **Naming:** `PascalCase` for types, methods and properties; `_camelCase` for private fields; interfaces start with `I`. Use primary constructors for injected dependencies (`public class OrderService(IOrderRepository orders)`).
+- **Settings** are read with the Options pattern (`IOptions<RabbitMqOptions>`). Never type a password, key, connection string or URL in code.
+- **No comments in code or config files.** Use clear names. Explanations go in the PR description or `docs/`.
+- Dates are always UTC: use `DateTime.UtcNow`, never `DateTime.Now`.
+
+## Build and packages
+
+- `Directory.Build.props` sets `net10.0`, `Nullable`, `ImplicitUsings` and `TreatWarningsAsErrors` for every project. Don't repeat them in a `.csproj`.
+- **Every package version is in `Directory.Packages.props`.** A `.csproj` has only `<PackageReference Include="..." />` with no `Version`. To add or update a package, change its version there, so every project uses the same version.
+- `.editorconfig` holds the formatting and naming rules. `dotnet build` must have 0 warnings.
+
+## Database
+
+- **Every primary key is a `Guid`.** An order keeps the same Id in both databases, and the Client's menu tables keep the Admin's Ids.
+- Identity uses `ApplicationUser : IdentityUser<Guid>` and `ApplicationRole : IdentityRole<Guid>`, and the tables are renamed without the `AspNet` prefix (`Users`, `Roles`, `UserRoles`, ...).
+- Every business entity inherits `AuditableEntity` (`CreatedAt`, `UpdatedAt` with private setters). `ApplicationUser` can't, so it implements `IAuditable` directly. `AuditInterceptor` sets both on save. Each `DbContext` registers it in `OnConfiguring`.
+- Times are UTC `timestamptz`. A time that comes from a message gets its own column (`PlacedAt`, `RatedAt`, `SourceUpdatedAt`), never `CreatedAt` or `UpdatedAt`.
+- Money is a plain `decimal` (`numeric(10,2)`), not a value object. Every money column gets a `>= 0` check constraint named `CK_<Table>_<Column>` in its configuration.
+- Enums are stored as text (`HaveConversion<string>()` in `ConfigureConventions`), the same strings as in the messages.
+- Database rules go in a configuration class in `Data/Configurations/` (Fluent API), not as data annotations on the entity.
+- A row that two writers can change at the same time (`Order`, and `MenuItem` in Client) has the `xmin` concurrency token. Catch `DbUpdateConcurrencyException` and retry or show a message; never ignore it.
+- Create migrations with `dotnet ef migrations add <Name> --project <App>`. **Read every generated migration before committing it**, and put any data backfill SQL in the migration itself.
+- In Development, each app applies pending migrations on startup with `await app.MigrateDatabaseAsync<TContext>()`, right after `builder.Build()`. Other environments never migrate on startup.
+- Keep `docs/erd-admin.*` and `docs/erd-client.*` in step with the entities in the same PR.
+
 ## Messaging
+
+The 6 messages, their fields and JSON examples are in [docs/messages.md](docs/messages.md). The exchange and queue design is DEC-002 in [docs/decisions-log.md](docs/decisions-log.md).
 
 - Never add a RabbitMQ dependency to `Shared.Contracts`. RabbitMQ code goes in `Shared.Messaging`.
 - Use the one `RabbitMqConnection` per app (`await connection.CreateChannelAsync()`). Never create a new `ConnectionFactory` or connection elsewhere.
 - Never type exchange, queue or routing key names by hand: use `RoutingKeys`, `QueueNames` and `RabbitMqTopology`.
+- **Publish only through the outbox** (UNI-44): add the message in the same `SaveChangesAsync` as the data change. Never publish to RabbitMQ directly from a service.
+- **Consumers use manual acks** (UNI-16): ack only after the database save succeeded. A failing message is retried 5 times about 200 ms apart, then nacked with `requeue: false` so it goes to its `.error` queue (UNI-17). Never catch an exception just to log it and ack.
+- **Every consumer checks `ProcessedMessage` first** (UNI-18) and saves the `MessageId` in the same transaction as its change, so a duplicate message does nothing.
+- A message is a full snapshot. The receiver never needs to ask the sender for more data.
 
-## Database
+## Order statuses
 
-- Every business entity inherits `AuditableEntity` (`CreatedAt`, `UpdatedAt` with private setters). `ApplicationUser` can't, so it implements `IAuditable` directly. `AuditInterceptor` sets both on save. Each `DbContext` registers it in `OnConfiguring`.
-- Money is a plain `decimal` (`numeric(10,2)`), not a value object. Every money column gets a `>= 0` check constraint named `CK_<Table>_<Column>` in its configuration.
-- A time that comes from a message gets its own column (`PlacedAt`, `RatedAt`, `SourceUpdatedAt`), never `CreatedAt` or `UpdatedAt`.
-- Keep `docs/erd-admin.*` and `docs/erd-client.*` in step with the entities in the same PR.
-- In Development, each app applies pending migrations on startup with `await app.MigrateDatabaseAsync<TContext>()`, right after `builder.Build()`. Other environments never migrate on startup.
+The full rules, the cancel race and the scenarios are DEC-001 in [docs/decisions-log.md](docs/decisions-log.md). Any change not in this table is refused and logged as a warning.
+
+| From | To | Who | Message |
+|---|---|---|---|
+| (new) | Placed | Customer (Client) | `OrderPlaced` |
+| Placed | Cancelled | Customer (Client) | `OrderCancelled` |
+| Placed | Accepted (+ETA) or Rejected (+reason) | Staff (Admin) | `OrderStatusChanged` |
+| Accepted → Preparing → Ready | next step | Staff (Admin) | `OrderStatusChanged` |
+| Ready | OutForDelivery | Staff (Admin), Delivery orders only | `OrderStatusChanged` |
+| Ready / OutForDelivery | Delivered | Staff (Admin) | `OrderStatusChanged` |
+
+- **Admin owns the order status.** The Client sets only `Placed` and `Cancelled`, and always applies Admin's `OrderStatusChanged`, even over its own `Cancelled`.
+- `Delivered`, `Rejected` and `Cancelled` are final.
+- The Client ignores an `OrderStatusChanged` older than `Order.LastStatusChangedAt`.
+
+## Real-time (SignalR)
+
+Hubs live in `Hubs/`. Consumers and services send events through `IHubContext<THub>` after the save succeeded. Use exactly these names, because the JavaScript listens for them.
+
+| App | Hub | URL | Who can connect | Event | Parameters | Sent to |
+|---|---|---|---|---|---|---|
+| Client | `OrderHub` | `/hubs/orders` | Customer | `OrderStatusUpdated` | `orderId`, `newStatus`, `estimatedTime` | `Clients.User(customerId)`, only the order's owner |
+| Admin | `AdminHub` | `/hubs/admin` | Any staff | `NewOrder` | `orderCard` (`OrderCardViewModel`) | `Clients.All` |
+| Admin | `AdminHub` | `/hubs/admin` | Any staff | `OrderUpdated` | `orderId`, `status`, `isPaid` | `Clients.All` |
+
+## Authorization
+
+Both apps use ASP.NET Core Identity with cookies (no JWT).
+
+**Client** has one role, `Customer`.
+
+| Controller | Access |
+|---|---|
+| `Home`, `Menu`, `Account` (Register, Login) | Public |
+| `Cart`, `Checkout`, `Orders`, `Ratings`, `Payment`, `Account` (Profile, ChangePassword, Logout) | `[Authorize(Roles = "Customer")]` |
+| `Payment.Webhook` | `[AllowAnonymous]`, checked with the Stripe signature |
+
+**Admin** has the roles `Admin`, `Staff` and `Manager`, and no public registration. A fallback policy requires login on every page unless it has `[AllowAnonymous]` (only `Account.Login`).
+
+| Policy | Roles | Used by |
+|---|---|---|
+| (logged in) | any staff | `Dashboard`, `Orders.Index`, `Orders.Details`, `AdminHub` |
+| `CanManageOrders` | Admin, Staff | `Orders.Board`, `Orders.Accept`, `Orders.Reject`, `Orders.UpdateStatus`, `MenuItems.Index`, `MenuItems.Details`, `MenuItems.ToggleAvailability` |
+| `CanViewReports` | Admin, Manager | `Ratings`, `Reports` |
+| `AdminOnly` | Admin | `Categories`, `MenuItems` Create/Edit/Delete, `Staff`, `Messages` |
+
+Use `[Authorize(Policy = "...")]` with these names, never `[Authorize(Roles = ...)]` in Admin.
+
+## UI
+
+- Bootstrap 5 in both apps. No other CSS framework.
+- Reuse the shared partials in `Views/Shared/` instead of copying markup: `_StatusBadge` (order status), `_DishCard` (menu item), `_Stars` (rating).
 
 ## Tests
 
@@ -74,3 +172,18 @@ Tests that need a real PostgreSQL or RabbitMQ, for example foreign keys, unique 
 - **Database tests:** mark the class with `[Collection(PostgresCollection.Name)]` and take `PostgresFixture` in the constructor. Call `await postgres.CreateDbContextAsync<AdminDbContext>()` (or `ClientDbContext`) in each test. Every call creates a new empty database, so tests never share data.
 - **RabbitMQ tests:** mark the class with `[Collection(RabbitMqCollection.Name)]`, take `RabbitMqFixture` in the constructor, and use `rabbitMq.CreateHost()` to get a host wired with `AddRabbitMq` against the test container.
 - Don't use EF Core InMemory: it doesn't enforce foreign keys or unique indexes, so tests pass that would fail on the real database.
+
+## Git
+
+- One Linear issue per branch. Branch from the latest `develop` and use the branch name Linear gives (`makarymaria79/uni-6-...`).
+- Commit messages start with the issue Id: `UNI-6 Set up EF Core and PostgreSQL in Client.Web`.
+- Open the PR into `develop`. It needs 1 approval from the other teammate. Nobody pushes to `develop` or `main` directly.
+- For a branch built on another branch that isn't merged yet, rebase it onto `develop` after the first one merges: `git rebase --onto develop <old-base> <branch>`.
+- When a decision changes, update this file and `docs/decisions-log.md` in the same PR.
+
+## Links
+
+- [docs/decisions-log.md](docs/decisions-log.md): DEC-001 order statuses, DEC-002 exchange and queues, DEC-003 audit columns
+- [docs/messages.md](docs/messages.md): the 6 messages with JSON examples
+- [docs/erd-client.md](docs/erd-client.md) and [docs/erd-admin.md](docs/erd-admin.md): the database diagrams and rules
+- Linear: [Decisions Log](https://linear.app/onlinefoodordering/document/decisions-log-85ab510ce1df) (early decisions and demo questions) and [Endpoints & Pages Catalogue](https://linear.app/onlinefoodordering/document/endpoints-and-pages-catalogue-6f73ed46121b) (every route, its access and its issue)
