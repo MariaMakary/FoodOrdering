@@ -26,7 +26,7 @@ public class ClientDbContextTests(PostgresFixture postgres)
                 "Categories", "MenuItems", "MenuItemExtras",
                 "Carts", "CartItems", "CartItemExtras",
                 "Orders", "OrderItems", "OrderItemExtras", "OrderStatusHistory", "Payments", "Ratings",
-                "ProcessedMessages", "MessageLogs",
+                "ProcessedMessages", "MessageLogs", "OutboxMessages",
                 "Users", "Roles", "UserRoles", "UserClaims", "UserLogins", "UserTokens", "RoleClaims",
                 "__EFMigrationsHistory"
             ],

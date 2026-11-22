@@ -190,3 +190,46 @@ Declaring an exchange or queue that already exists with the same settings does n
 ### Why a shared project
 
 Both apps need the same interface and interceptor, and the interceptor needs EF Core. `Shared.Contracts` must stay free of dependencies and `Shared.Messaging` is for RabbitMQ, so EF Core code that both apps share goes in **`Shared.Persistence`**.
+
+---
+
+## DEC-004: Outbox on every publish (UNI-44)
+
+**Date:** 2026-11-22
+**Related tickets:** UNI-12 (publisher), UNI-20 (offline test), every ticket that sends a message
+**Code:** `Shared.Persistence/Outbox/` (`OutboxMessage`, `IOutbox`, `EfOutbox`, `OutboxDispatcher`, `AddOutbox`), `Shared.Messaging/IMessagePublisher.cs`
+
+### Decision
+
+No feature publishes to RabbitMQ directly. It adds the message to the `OutboxMessages` table **in the same `SaveChangesAsync` as its data change**, and a background dispatcher sends it.
+
+```
+Service ──IOutbox.Add + SaveChangesAsync──▶ business tables + OutboxMessages   (one transaction)
+                                                         │
+OutboxDispatcher (every 2 s) ──reads unsent rows, oldest first──┘
+        │
+        └──IMessagePublisher.PublishAsync──▶ RabbitMQ ──▶ sets SentAt
+```
+
+### Why
+
+Without it, "save then publish" has two ways to go wrong:
+
+| What happens | Without the outbox | With the outbox |
+|---|---|---|
+| RabbitMQ is down when the customer orders | The order is saved but `OrderPlaced` is lost, or the checkout fails | The order and the outbox row are saved. The row is sent when RabbitMQ is back |
+| The app crashes between the save and the publish | The message is lost | The row is still there and is sent after the restart |
+| The save fails (e.g. a check constraint) | A message may already be sent for data that doesn't exist | Nothing is saved, so nothing is sent |
+
+### Rules
+
+- **Order:** rows are sent oldest `CreatedAt` first. If a row fails, the dispatcher stops for that round, so later rows (e.g. a `PaymentCompleted`) never overtake an earlier one (its `OrderPlaced`). The failed row keeps `SentAt = null`, `Attempts` goes up, and `LastError` holds the reason.
+- **At least once:** if the app stops after RabbitMQ confirmed but before `SentAt` is saved, the row is sent again. Consumers already ignore duplicates by `MessageId` (UNI-18), so this is safe.
+- **Only known messages:** `OutboxMessage.From` refuses a message type that has no queue in `RabbitMqTopology.Bindings`, so a message can't be saved that the dispatcher could never route.
+- **Payload** is the message JSON from `JsonOptions.Default`, stored as `text` like `MessageLog.Payload`. `Type` is the class name (`OrderPlaced`), the same as the RabbitMQ `Type` header.
+- **`IMessagePublisher.PublishAsync(MessageBase message)`** takes the base type, because the dispatcher only knows the type at runtime. The publisher finds the routing key with `RabbitMqTopology.RoutingKeyFor(message.GetType())`.
+- `PollInterval` (2 s) and `BatchSize` (50) are in the optional `Outbox` settings section.
+
+### Why it lives in `Shared.Persistence`
+
+Every part of the outbox uses EF Core (the table, `EfOutbox`, the dispatcher's query). Only the dispatcher touches messaging, through the `IMessagePublisher` interface. Following DEC-003, EF Core code both apps share goes in `Shared.Persistence`, which now references `Shared.Messaging` (Persistence → Messaging → Contracts, no cycle). `Shared.Messaging` stays free of EF Core.

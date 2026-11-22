@@ -24,7 +24,7 @@ public class AdminDbContextTests(PostgresFixture postgres)
             [
                 "Categories", "MenuItems", "MenuItemExtras",
                 "Orders", "OrderItems", "OrderItemExtras", "OrderStatusHistory", "Payments", "Ratings",
-                "ProcessedMessages", "MessageLogs",
+                "ProcessedMessages", "MessageLogs", "OutboxMessages",
                 "Users", "Roles", "UserRoles", "UserClaims", "UserLogins", "UserTokens", "RoleClaims",
                 "__EFMigrationsHistory"
             ],

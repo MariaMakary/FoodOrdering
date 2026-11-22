@@ -8,7 +8,7 @@ Two ASP.NET Core MVC apps that talk to each other through RabbitMQ:
 | `Admin.Web` | Restaurant app: accept, prepare and deliver orders |
 | `Shared.Contracts` | Message contracts and enums shared by both apps |
 | `Shared.Messaging` | RabbitMQ connection, topology and settings used by both apps |
-| `Shared.Persistence` | EF Core code used by both apps (audit columns, migrate on startup) |
+| `Shared.Persistence` | EF Core code used by both apps (audit columns, migrate on startup, outbox) |
 
 Each app has its own PostgreSQL container and database (`foodordering_client`, `foodordering_admin`).
 
@@ -166,8 +166,10 @@ If a setting is in more than one place, the later one wins: `appsettings.json` â
 | `RabbitMq:RetryCount` | both | `3` | `appsettings.json` | No |
 | `RabbitMq:Username` | both | none | `appsettings.Development.json` / `RabbitMq__Username` | Yes |
 | `RabbitMq:Password` | both | none | `appsettings.Development.json` / `RabbitMq__Password` | Yes |
+| `Outbox:PollInterval` | both | `00:00:02` | code default, override in any settings file | No |
+| `Outbox:BatchSize` | both | `50` | code default, override in any settings file | No |
 
-The `RabbitMq` section is read into `Shared.Messaging.RabbitMqOptions` by `builder.Services.AddRabbitMq(builder.Configuration)` in each app's `Program.cs`. Use it in a class by injecting `IOptions<RabbitMqOptions>`.
+The `RabbitMq` section is read into `Shared.Messaging.RabbitMqOptions` by `builder.Services.AddRabbitMq(builder.Configuration)` in each app's `Program.cs`. Use it in a class by injecting `IOptions<RabbitMqOptions>`. The optional `Outbox` section is read into `Shared.Persistence.Outbox.OutboxOptions` by `builder.Services.AddOutbox<TContext>()`.
 
 Stripe (UNI-75) and AI (UNI-34) settings will be added here with their own options classes when those tickets are done.
 

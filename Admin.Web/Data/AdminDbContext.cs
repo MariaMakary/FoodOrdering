@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Shared.Contracts.Enums;
 using Shared.Persistence;
+using Shared.Persistence.Outbox;
 
 namespace Admin.Web.Data;
 
@@ -40,6 +41,8 @@ public class AdminDbContext(DbContextOptions<AdminDbContext> options)
         modelBuilder.Entity<IdentityUserLogin<Guid>>().ToTable("UserLogins");
         modelBuilder.Entity<IdentityUserToken<Guid>>().ToTable("UserTokens");
         modelBuilder.Entity<IdentityRoleClaim<Guid>>().ToTable("RoleClaims");
+
+        modelBuilder.AddOutbox();
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AdminDbContext).Assembly);
     }
