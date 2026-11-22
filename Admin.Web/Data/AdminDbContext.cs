@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Shared.Contracts.Enums;
+using Shared.Persistence;
 
 namespace Admin.Web.Data;
 
@@ -22,6 +23,11 @@ public class AdminDbContext(DbContextOptions<AdminDbContext> options)
     public DbSet<Rating> Ratings => Set<Rating>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
     public DbSet<MessageLog> MessageLogs => Set<MessageLog>();
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.AddInterceptors(AuditInterceptor.Instance);
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

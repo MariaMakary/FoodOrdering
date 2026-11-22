@@ -5,4 +5,5 @@
   <Project Path="FoodOrdering.UnitTests/FoodOrdering.UnitTests.csproj" />
   <Project Path="Shared.Contracts/Shared.Contracts.csproj" />
   <Project Path="Shared.Messaging/Shared.Messaging.csproj" />
+  <Project Path="Shared.Persistence/Shared.Persistence.csproj" />
 </Solution>

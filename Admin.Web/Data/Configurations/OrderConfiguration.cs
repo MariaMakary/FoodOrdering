@@ -8,6 +8,8 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
 {
     public void Configure(EntityTypeBuilder<Order> builder)
     {
+        builder.ToTable(t => t.HasCheckConstraint("CK_Orders_Total", "\"Total\" >= 0"));
+
         builder.HasKey(o => o.Id);
         builder.Property(o => o.Id).ValueGeneratedNever();
 
@@ -23,6 +25,6 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
 
         builder.HasIndex(o => o.OrderNumber).IsUnique();
         builder.HasIndex(o => o.Status);
-        builder.HasIndex(o => o.CreatedAt);
+        builder.HasIndex(o => o.PlacedAt);
     }
 }

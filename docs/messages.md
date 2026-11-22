@@ -304,7 +304,7 @@ Sent when staff create, edit or delete a menu item. Client keeps its own copy of
 | `photoUrl` | string? | no | Full URL Client can load directly |
 | `isVegetarian` | bool | yes | |
 | `isAvailable` | bool | yes | `false` = shown as "sold out", cannot be ordered |
-| `category` | `{ id, name }`? | not for `Deleted` | Client creates the category if it doesn't have it yet |
+| `category` | `{ id, name, sortOrder }`? | not for `Deleted` | Client creates the category if it doesn't have it yet, and updates its name and `sortOrder` if they changed. `sortOrder` (int) is the position of the category on the menu, lowest first. |
 | `extras` | list of `{ id, name, price }` | yes | The **full** list. It replaces Client's list. `[]` if none. |
 | `updatedAt` | DateTime (UTC) | yes | Client ignores a message older than the `updatedAt` it already has for this item |
 
@@ -325,7 +325,8 @@ Created / Updated:
   "isAvailable": true,
   "category": {
     "id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-    "name": "Burgers"
+    "name": "Burgers",
+    "sortOrder": 1
   },
   "extras": [
     { "id": "12345678-90ab-4cde-8f01-23456789abcd", "name": "Extra cheese", "price": 1.00 },
@@ -356,7 +357,7 @@ Deleted:
 }
 ```
 
-**Can Client do its job?** ✅ It can show the full menu with categories, photos, prices, the vegetarian badge and extras, and block sold-out dishes, without ever calling Admin. On `Deleted`, Client hides the item but keeps the row, because old orders and ratings still point to it.
+**Can Client do its job?** ✅ It can show the full menu with categories in the right order, photos, prices, the vegetarian badge and extras, and block sold-out dishes, without ever calling Admin. On `Deleted`, Client hides the item but keeps the row, because old orders and ratings still point to it.
 
 ---
 

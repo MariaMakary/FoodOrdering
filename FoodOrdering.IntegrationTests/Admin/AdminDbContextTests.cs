@@ -56,6 +56,20 @@ public class AdminDbContextTests(PostgresFixture postgres)
         await Should.ThrowAsync<DbUpdateConcurrencyException>(() => consumer.SaveChangesAsync());
     }
 
+    [Fact]
+    public async Task SaveChangesAsync_ShouldThrow_WhenAPriceIsNegative()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<AdminDbContext>();
+        await using AdminDbContext context = postgres.NewDbContext<AdminDbContext>(connectionString);
+        var category = new Category { Id = Guid.NewGuid(), Name = "Burgers" };
+        context.Categories.Add(category);
+        context.MenuItems.Add(new MenuItem { Id = Guid.NewGuid(), CategoryId = category.Id, Name = "Chicken Burger", Price = -1m });
+
+        DbUpdateException exception = await Should.ThrowAsync<DbUpdateException>(() => context.SaveChangesAsync());
+
+        exception.InnerException!.Message.ShouldContain("CK_MenuItems_Price");
+    }
+
     private static Order NewOrder(Guid id) => new()
     {
         Id = id,
@@ -68,7 +82,6 @@ public class AdminDbContextTests(PostgresFixture postgres)
         PaymentStatus = PaymentStatus.CashOnDelivery,
         Status = OrderStatus.Placed,
         Total = 12.50m,
-        CreatedAt = DateTime.UtcNow,
-        ReceivedAt = DateTime.UtcNow
+        PlacedAt = DateTime.UtcNow
     };
 }

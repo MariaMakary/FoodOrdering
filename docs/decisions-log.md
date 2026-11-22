@@ -157,3 +157,36 @@ Declaring an exchange or queue that already exists with the same settings does n
 - **`Shared.Contracts`** holds only plain classes: messages, enums, `JsonOptions`, `RoutingKeys`, `QueueNames`. It has no RabbitMQ dependency, so anything can reference it.
 - **`Shared.Messaging`** holds the RabbitMQ code. Each app calls `builder.Services.AddRabbitMq(builder.Configuration)`, which validates the settings, registers one `RabbitMqConnection` and declares the topology at startup (`RabbitMqTopologyInitializer`).
 - **One connection per app, many channels.** RabbitMQ connections are expensive TCP connections, channels are cheap. `RabbitMqConnection` opens the connection once, shares it for the whole app, and hands out channels with `CreateChannelAsync`. The connection is named after the app (`Client.Web`, `Admin.Web`), so the Management UI shows who is connected.
+
+---
+
+## DEC-003: Audit columns on every business table (UNI-54)
+
+**Date:** 2026-11-22
+**Related tickets:** UNI-54 (Client ERD), UNI-55 (Admin ERD), UNI-6 (Client EF Core)
+**Code:** `Shared.Persistence/` (`IAuditable`, `AuditInterceptor`)
+
+### Decision
+
+- Every business table has `CreatedAt` and `UpdatedAt` (UTC). The entity implements `IAuditable`.
+- Nobody sets them by hand. `AuditInterceptor` sets both when a row is added, and only `UpdatedAt` when it changes. A change to `CreatedAt` in code is ignored.
+- Each `DbContext` registers it in `OnConfiguring` with `optionsBuilder.AddInterceptors(AuditInterceptor.Instance)`, so the app, the tests and `dotnet ef` all use it.
+
+### Which tables
+
+- **With audit columns:** `Users` and every menu, cart and order table in both apps.
+- **Without:** the join tables (`UserRoles`, `CartItemExtra`), `OrderStatusHistory` (a row is never changed, `ChangedAt` is its time) and the messaging tables (`ProcessedMessage`, `MessageLog`, `OutboxMessage`), which have their own time columns.
+
+### Times that come from a message are separate columns
+
+`CreatedAt` and `UpdatedAt` always mean "when this database wrote the row". A time that comes from the other app keeps its own name:
+
+| App | Column | From |
+|---|---|---|
+| Admin | `Order.PlacedAt` | `OrderPlaced.placedAt` (`Order.CreatedAt` is when Admin received it) |
+| Admin | `Rating.RatedAt` | `DishRated.ratedAt` |
+| Client | `MenuItem.SourceUpdatedAt` | `MenuItemUpdated.updatedAt`, used to ignore older menu messages |
+
+### Why a shared project
+
+Both apps need the same interface and interceptor, and the interceptor needs EF Core. `Shared.Contracts` must stay free of dependencies and `Shared.Messaging` is for RabbitMQ, so EF Core code that both apps share goes in **`Shared.Persistence`**.

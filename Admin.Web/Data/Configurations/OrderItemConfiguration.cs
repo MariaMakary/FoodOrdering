@@ -8,7 +8,11 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
 {
     public void Configure(EntityTypeBuilder<OrderItem> builder)
     {
-        builder.ToTable(t => t.HasCheckConstraint("CK_OrderItems_Quantity", "\"Quantity\" > 0"));
+        builder.ToTable(t =>
+        {
+            t.HasCheckConstraint("CK_OrderItems_Quantity", "\"Quantity\" > 0");
+            t.HasCheckConstraint("CK_OrderItems_UnitPrice", "\"UnitPrice\" >= 0");
+        });
 
         builder.HasKey(i => i.Id);
         builder.Property(i => i.Name).HasMaxLength(150).IsRequired();
