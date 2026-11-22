@@ -1,12 +1,19 @@
 # FoodOrdering
 
-Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ. Shared code is split in two: `Shared.Contracts` holds plain classes only (messages, enums, JSON options, routing keys and queue names), and `Shared.Messaging` holds the RabbitMQ code (connection, topology, `AddRabbitMq`). Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`. See `README.md` to run locally and `docs/` for the decisions log and message format.
+Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ. Shared code is split in three: `Shared.Contracts` holds plain classes only (messages, enums, JSON options, routing keys and queue names), `Shared.Messaging` holds the RabbitMQ code (connection, topology, `AddRabbitMq`), and `Shared.Persistence` holds the EF Core code both apps use (`IAuditable`, `AuditInterceptor`). Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`. See `README.md` to run locally and `docs/` for the decisions log and message format.
 
 ## Messaging
 
 - Never add a RabbitMQ dependency to `Shared.Contracts`. RabbitMQ code goes in `Shared.Messaging`.
 - Use the one `RabbitMqConnection` per app (`await connection.CreateChannelAsync()`). Never create a new `ConnectionFactory` or connection elsewhere.
 - Never type exchange, queue or routing key names by hand: use `RoutingKeys`, `QueueNames` and `RabbitMqTopology`.
+
+## Database
+
+- Every business table implements `IAuditable` (`CreatedAt`, `UpdatedAt`). Never set them by hand: `AuditInterceptor` does it on save. Each `DbContext` registers it in `OnConfiguring`.
+- Money is a plain `decimal` (`numeric(10,2)`), not a value object. Every money column gets a `>= 0` check constraint named `CK_<Table>_<Column>` in its configuration.
+- A time that comes from a message gets its own column (`PlacedAt`, `RatedAt`, `SourceUpdatedAt`), never `CreatedAt` or `UpdatedAt`.
+- Keep `docs/erd-admin.*` and `docs/erd-client.*` in step with the entities in the same PR.
 
 ## Tests
 
@@ -39,6 +46,7 @@ Tests that need a real PostgreSQL or RabbitMQ, for example foreign keys, unique 
 | `Client/` | Database code in Client.Web |
 | `Admin/` | Database code in Admin.Web |
 | `Messaging/` | `Shared.Messaging` against a real RabbitMQ |
+| `Persistence/` | `Shared.Persistence` against a real PostgreSQL |
 | `Infrastructure/` | The test setup itself (`PostgresFixture`, `RabbitMqFixture`) |
 
 - **Database tests:** mark the class with `[Collection(PostgresCollection.Name)]` and take `PostgresFixture` in the constructor. Call `await postgres.CreateDbContextAsync<AdminDbContext>()` (or `ClientDbContext`) in each test. Every call creates a new empty database, so tests never share data.

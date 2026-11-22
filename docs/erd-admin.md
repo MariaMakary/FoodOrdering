@@ -10,7 +10,9 @@
 - **Identity tables drop the `AspNet` prefix:** `Users`, `Roles`, `UserRoles`, `UserClaims`, `UserLogins`, `UserTokens`, `RoleClaims` (renamed in `OnModelCreating`).
 - **`Order` uses optimistic concurrency.** PostgreSQL's built-in `xmin` row version is the concurrency token. If two changes to the same order are saved at the same time (staff accepting while `OrderCancelled` is processed, or two staff at once), the second save throws `DbUpdateConcurrencyException`, reloads the order and checks the DEC-001 rules again.
 - **No foreign keys to the Client database.** `Order.Id` is the same Guid the Client created, and `CustomerId` is a plain value copied from `OrderPlaced`.
-- **Money** is `decimal(10,2)`. **Times** are UTC.
+- **Money** is `decimal(10,2)`, never negative: every money column has a `>= 0` check constraint (`CK_<Table>_<Column>`). **Times** are UTC.
+- **Audit columns ([DEC-003](decisions-log.md)):** every business table has `CreatedAt` and `UpdatedAt`, set on save by `AuditInterceptor` from `Shared.Persistence`. Never set them by hand. Not on `UserRoles`, `OrderStatusHistory` or the messaging tables. Times sent by the Client keep their own columns: `Order.PlacedAt` and `Rating.RatedAt`.
+- **Categories have a `SortOrder`** (lowest first on the menu). It is sent to Client in `MenuItemUpdated.category.sortOrder`.
 - **Enums** (`OrderStatus`, `PaymentStatus`, `DeliveryType`, `PaymentMethod`) are stored as strings, the same as in the messages.
 - **Menu items are never really deleted.** `IsDeleted = true` hides them, because old orders and ratings still point to them.
 
@@ -20,7 +22,7 @@
 |---|---|---|
 | Identity | `Users` | Staff logins. Extended with `FirstName`, `LastName`, `IsActive` (`PhoneNumber` is built into Identity). |
 | Identity | `Roles`, `UserRoles` | Roles `Admin`, `Staff`, `Manager` and who has them |
-| Menu | `Category` | Menu categories (Name is unique) |
+| Menu | `Category` | Menu categories (Name is unique). `SortOrder` sets their order on the menu. |
 | Menu | `MenuItem` | The master menu. Same columns as the Client copy. |
 | Menu | `MenuItemExtra` | Extras a dish can have (cheese, bacon, ...) |
 | Orders | `Order` | One row per order, copied from `OrderPlaced`, then updated by staff. `xmin` protects it from two changes at once. |
@@ -58,7 +60,7 @@ This is the test for this ticket: every field of every message has a column to l
 | `items[].extras[].name` | `OrderItemExtra.Name` |
 | `items[].extras[].price` | `OrderItemExtra.Price` |
 | `total` | `Order.Total` |
-| `placedAt` | `Order.CreatedAt`. `Order.ReceivedAt` is when Admin got the message. |
+| `placedAt` | `Order.PlacedAt`. `Order.CreatedAt` is when Admin got the message. |
 
 Also: `Order.Status = Placed`, and a first `OrderStatusHistory` row is added.
 
@@ -94,7 +96,7 @@ Also: `Order.Status = Cancelled`, `ChangedByUserId = null`. If the cancel is ref
 | `customerName` | `Rating.CustomerName` |
 | `stars` | `Rating.Stars` |
 | `comment` | `Rating.Comment` |
-| `ratedAt` | `Rating.CreatedAt` |
+| `ratedAt` | `Rating.RatedAt` |
 
 ### `OrderStatusChanged` (sent): where the values come from
 
@@ -120,9 +122,9 @@ The message is saved in `OutboxMessage` in the same transaction as the status ch
 | `photoUrl` | `MenuItem.PhotoUrl` |
 | `isVegetarian` | `MenuItem.IsVegetarian` |
 | `isAvailable` | `MenuItem.IsAvailable` |
-| `category.id`, `category.name` | `Category.Id`, `Category.Name` |
+| `category.id`, `category.name`, `category.sortOrder` | `Category.Id`, `Category.Name`, `Category.SortOrder` |
 | `extras[].id`, `.name`, `.price` | `MenuItemExtra.Id`, `.Name`, `.Price` |
-| `updatedAt` | `MenuItem.UpdatedAt` |
+| `updatedAt` | Not a column: `DateTime.UtcNow` when the message is built. `MenuItem.UpdatedAt` is set later by the interceptor on save, and does not move when only the extras change. |
 
 ✅ Every field of all 6 messages has a column.
 

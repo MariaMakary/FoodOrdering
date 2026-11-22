@@ -8,6 +8,8 @@ public class MenuItemConfiguration : IEntityTypeConfiguration<MenuItem>
 {
     public void Configure(EntityTypeBuilder<MenuItem> builder)
     {
+        builder.ToTable(t => t.HasCheckConstraint("CK_MenuItems_Price", "\"Price\" >= 0"));
+
         builder.HasKey(m => m.Id);
         builder.Property(m => m.Name).HasMaxLength(150).IsRequired();
         builder.Property(m => m.Description).HasMaxLength(1000);
