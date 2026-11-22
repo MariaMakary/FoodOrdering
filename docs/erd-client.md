@@ -14,7 +14,7 @@
 - **`Order` and `MenuItem` use optimistic concurrency** with PostgreSQL's `xmin`. `Order` is changed by the customer (cancel, payment) and by the `OrderStatusChanged` consumer. `MenuItem` can get two `MenuItemUpdated` messages at once. The second save throws `DbUpdateConcurrencyException`, which is retried.
 - **Out-of-order status messages (DEC-002):** `Order.LastStatusChangedAt` holds the `changedAt` of the last applied `OrderStatusChanged`. A message with an older `changedAt` is ignored.
 - **Order lines are copies.** `OrderItem` and `OrderItemExtra` store the name and price **at checkout**, so later menu changes never change an old order.
-- **`OrderNumber`** is `FO-<number>`, taken from a PostgreSQL sequence, and unique.
+- **`OrderNumber`** is `FO-<number>`, taken from the PostgreSQL sequence `OrderNumbers` (starts at 1000), and unique.
 - **Money** is `numeric(10,2)`, never negative: every money column has a `>= 0` check constraint (`CK_<Table>_<Column>`), the same as Admin. **Times** are UTC `timestamptz`, always `DateTime.UtcNow`.
 - **Enums** (`OrderStatus`, `PaymentStatus`, `DeliveryType`, `PaymentMethod`) are stored as strings, the same as in the messages. `PaymentAttemptStatus` (`Pending`, `Succeeded`, `Failed`) is a Client-only enum in `Client.Web/Models/Enums`.
 - **Menu items are never really deleted.** `MenuItemUpdated` with `Deleted` sets `IsDeleted = true`, because old orders and ratings still point to them. Extras that disappear from the list are deleted, and their `CartItemExtra` rows are deleted with them (cascade).

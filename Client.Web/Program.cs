@@ -1,4 +1,7 @@
+using Client.Web.Data;
+using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
+using Shared.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,7 +10,17 @@ builder.Services.AddControllersWithViews();
 
 builder.Services.AddRabbitMq(builder.Configuration);
 
+var clientDbConnection = builder.Configuration.GetConnectionString("ClientDb")
+    ?? throw new InvalidOperationException("ConnectionStrings:ClientDb is missing. Set it in appsettings.Development.json.");
+
+builder.Services.AddDbContext<ClientDbContext>(options => options.UseNpgsql(clientDbConnection));
+
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    await app.MigrateDatabaseAsync<ClientDbContext>();
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

@@ -84,16 +84,16 @@ The `dotnet-ef` tool is pinned in `dotnet-tools.json`. Restore it once to add mi
 dotnet tool restore
 ```
 
-To start over with an empty database, drop it and run the app again:
+To start over with an empty database, drop it and run the app again (use `Client.Web` or `Admin.Web`):
 
 ```bash
-dotnet ef database drop --force --project Admin.Web
+dotnet ef database drop --force --project Client.Web
 ```
 
 To add a migration after changing an entity or configuration:
 
 ```bash
-dotnet ef migrations add <Name> --project Admin.Web
+dotnet ef migrations add <Name> --project Client.Web
 ```
 
 ### 5. Run the apps
