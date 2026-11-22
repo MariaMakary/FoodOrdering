@@ -1,3 +1,4 @@
+using Admin.Web;
 using Admin.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
@@ -14,6 +15,8 @@ var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
     ?? throw new InvalidOperationException("ConnectionStrings:AdminDb is missing. Set it in appsettings.Development.json.");
 
 builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(adminDbConnection));
+
+builder.Services.AddAdminServices();
 
 var app = builder.Build();
 

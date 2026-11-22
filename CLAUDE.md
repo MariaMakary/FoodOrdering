@@ -2,6 +2,27 @@
 
 Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ. Shared code is split in three: `Shared.Contracts` holds plain classes only (messages, enums, JSON options, routing keys and queue names), `Shared.Messaging` holds the RabbitMQ code (connection, topology, `AddRabbitMq`), and `Shared.Persistence` holds the EF Core code both apps use (`IAuditable`, `AuditInterceptor`). Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`. See `README.md` to run locally and `docs/` for the decisions log and message format.
 
+## Folder layout
+
+`Client.Web` and `Admin.Web` have the same folders:
+
+| Folder | What goes there |
+|---|---|
+| `Controllers/` | Receive the request, call a service, return a view. No database access and no business logic. |
+| `Services/` | Business logic, as an interface and a class (`IOrderService`, `OrderService`). Calls repositories, never `DbContext`. |
+| `Repositories/` | Database access only, as an interface and a class. The only place that uses the `DbContext`. |
+| `Data/` | The `DbContext`, `Configurations/` (one per entity) and seeders |
+| `Models/Entities/` | EF Core classes (database tables). Never sent to a view. |
+| `Models/ViewModels/` | Classes sent to and from views, with data annotations for form validation |
+| `Models/Identity/` | `ApplicationUser`, `ApplicationRole` |
+| `Models/Enums/` | Enums used by only this app. Enums in messages live in `Shared.Contracts`. |
+| `Messaging/Consumers/` | This app's RabbitMQ consumers |
+| `Hubs/` | SignalR hubs |
+| `Options/` | Settings classes used by only this app (e.g. `StripeOptions`) |
+
+- Register every service and repository in `ServiceExtensions.cs` (`AddClientServices()` / `AddAdminServices()`), not in `Program.cs`. Use `AddScoped`, the same lifetime as the `DbContext`.
+- `IExampleService` and `IExampleRepository` only show the pattern. Delete them in the PR that adds the first real service.
+
 ## Messaging
 
 - Never add a RabbitMQ dependency to `Shared.Contracts`. RabbitMQ code goes in `Shared.Messaging`.
