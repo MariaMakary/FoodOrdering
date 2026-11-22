@@ -7,6 +7,8 @@ Two ASP.NET Core MVC apps that talk to each other through RabbitMQ:
 | `Client.Web` | Customer app: browse, place and cancel orders |
 | `Admin.Web` | Restaurant app: accept, prepare and deliver orders |
 | `Shared.Contracts` | Message contracts and enums shared by both apps |
+| `Shared.Messaging` | RabbitMQ connection, topology and settings used by both apps |
+| `Shared.Persistence` | EF Core code used by both apps (audit columns, migrate on startup) |
 
 Each app has its own PostgreSQL container and database (`foodordering_client`, `foodordering_admin`).
 
