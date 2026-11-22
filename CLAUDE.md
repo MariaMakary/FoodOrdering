@@ -8,7 +8,7 @@ Shared code is split in three:
 |---|---|---|
 | `Shared.Contracts` | Plain classes only: messages, enums, JSON options, routing keys and queue names | nothing |
 | `Shared.Messaging` | RabbitMQ code: connection, topology, `AddRabbitMq` | `Shared.Contracts`, RabbitMQ.Client |
-| `Shared.Persistence` | EF Core code both apps use: `AuditableEntity`, `IAuditable`, `AuditInterceptor`, `MigrateDatabaseAsync` | EF Core |
+| `Shared.Persistence` | EF Core code both apps use: `AuditableEntity`, `IAuditable`, `AuditInterceptor`, `MigrateDatabaseAsync`, and the outbox (`Outbox/`) | EF Core, `Shared.Messaging` |
 
 Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`.
 
@@ -75,7 +75,8 @@ The 6 messages, their fields and JSON examples are in [docs/messages.md](docs/me
 - Never add a RabbitMQ dependency to `Shared.Contracts`. RabbitMQ code goes in `Shared.Messaging`.
 - Use the one `RabbitMqConnection` per app (`await connection.CreateChannelAsync()`). Never create a new `ConnectionFactory` or connection elsewhere.
 - Never type exchange, queue or routing key names by hand: use `RoutingKeys`, `QueueNames` and `RabbitMqTopology`.
-- **Publish only through the outbox** (UNI-44): add the message in the same `SaveChangesAsync` as the data change. Never publish to RabbitMQ directly from a service.
+- **Publish only through the outbox** (DEC-004): inject `IOutbox`, call `outbox.Add(message)`, then the normal `SaveChangesAsync`, so the data change and the message are saved together or not at all. Never call `IMessagePublisher` from a service, controller or consumer; only `OutboxDispatcher` does. Each app registers it with `builder.Services.AddOutbox<TContext>()` and maps the table with `modelBuilder.AddOutbox()`.
+- A message type can only go in the outbox if it has a queue in `RabbitMqTopology.Bindings`.
 - **Consumers use manual acks** (UNI-16): ack only after the database save succeeded. A failing message is retried 5 times about 200 ms apart, then nacked with `requeue: false` so it goes to its `.error` queue (UNI-17). Never catch an exception just to log it and ack.
 - **Every consumer checks `ProcessedMessage` first** (UNI-18) and saves the `MessageId` in the same transaction as its change, so a duplicate message does nothing.
 - A message is a full snapshot. The receiver never needs to ask the sender for more data.
@@ -151,6 +152,7 @@ Fast tests with no database, no RabbitMQ and no Docker. Put each test in the fol
 |---|---|
 | `Contracts/` | `Shared.Contracts` (messages, enums, JSON) |
 | `Messaging/` | `Shared.Messaging` (options, topology) with a substituted `IChannel` |
+| `Persistence/` | `Shared.Persistence` code that needs no database (e.g. `OutboxMessage`) |
 | `Client/Consumers/` | RabbitMQ consumers in Client.Web |
 | `Client/Services/` | Services in Client.Web |
 | `Admin/Consumers/` | RabbitMQ consumers in Admin.Web |
@@ -183,7 +185,7 @@ Tests that need a real PostgreSQL or RabbitMQ, for example foreign keys, unique 
 
 ## Links
 
-- [docs/decisions-log.md](docs/decisions-log.md): DEC-001 order statuses, DEC-002 exchange and queues, DEC-003 audit columns
+- [docs/decisions-log.md](docs/decisions-log.md): DEC-001 order statuses, DEC-002 exchange and queues, DEC-003 audit columns, DEC-004 outbox
 - [docs/messages.md](docs/messages.md): the 6 messages with JSON examples
 - [docs/erd-client.md](docs/erd-client.md) and [docs/erd-admin.md](docs/erd-admin.md): the database diagrams and rules
 - Linear: [Decisions Log](https://linear.app/onlinefoodordering/document/decisions-log-85ab510ce1df) (early decisions and demo questions) and [Endpoints & Pages Catalogue](https://linear.app/onlinefoodordering/document/endpoints-and-pages-catalogue-6f73ed46121b) (every route, its access and its issue)

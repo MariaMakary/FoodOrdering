@@ -3,6 +3,7 @@ using Admin.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
 using Shared.Persistence;
+using Shared.Persistence.Outbox;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +16,7 @@ var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
     ?? throw new InvalidOperationException("ConnectionStrings:AdminDb is missing. Set it in appsettings.Development.json.");
 
 builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(adminDbConnection));
+builder.Services.AddOutbox<AdminDbContext>();
 
 builder.Services.AddAdminServices();
 

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Shared.Contracts.Enums;
 using Shared.Persistence;
+using Shared.Persistence.Outbox;
 
 namespace Client.Web.Data;
 
@@ -47,6 +48,8 @@ public class ClientDbContext(DbContextOptions<ClientDbContext> options)
         modelBuilder.Entity<IdentityRoleClaim<Guid>>().ToTable("RoleClaims");
 
         modelBuilder.HasSequence<long>(OrderNumberSequence).StartsAt(1000);
+
+        modelBuilder.AddOutbox();
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ClientDbContext).Assembly);
     }
