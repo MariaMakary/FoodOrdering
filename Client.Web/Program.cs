@@ -1,3 +1,4 @@
+using Client.Web;
 using Client.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
@@ -14,6 +15,8 @@ var clientDbConnection = builder.Configuration.GetConnectionString("ClientDb")
     ?? throw new InvalidOperationException("ConnectionStrings:ClientDb is missing. Set it in appsettings.Development.json.");
 
 builder.Services.AddDbContext<ClientDbContext>(options => options.UseNpgsql(clientDbConnection));
+
+builder.Services.AddClientServices();
 
 var app = builder.Build();
 
