@@ -2,7 +2,7 @@ using Shared.Persistence;
 
 namespace Admin.Web.Models.Entities;
 
-public class Rating : IAuditable
+public class Rating : AuditableEntity
 {
     public Guid Id { get; set; }
     public Guid OrderId { get; set; }
@@ -11,8 +11,6 @@ public class Rating : IAuditable
     public int Stars { get; set; }
     public string? Comment { get; set; }
     public DateTime RatedAt { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
 
     public Order Order { get; set; } = null!;
     public MenuItem MenuItem { get; set; } = null!;

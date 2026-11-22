@@ -35,7 +35,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         return (TContext)Activator.CreateInstance(typeof(TContext), options)!;
     }
 
-    private string NewDatabaseConnectionString() =>
+    public string NewDatabaseConnectionString() =>
         new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString())
         {
             Database = $"test_{Guid.NewGuid():N}"

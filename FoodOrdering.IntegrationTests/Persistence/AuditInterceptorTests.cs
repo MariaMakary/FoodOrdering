@@ -38,7 +38,6 @@ public class AuditInterceptorTests(PostgresFixture postgres)
         {
             Category saved = await staff.Categories.SingleAsync(c => c.Id == category.Id);
             saved.Name = "Grill";
-            saved.CreatedAt = DateTime.UtcNow.AddYears(-1);
             await staff.SaveChangesAsync();
         }
 

@@ -10,10 +10,11 @@ Two ASP.NET Core MVC apps (`Client.Web`, `Admin.Web`) that talk through RabbitMQ
 
 ## Database
 
-- Every business table implements `IAuditable` (`CreatedAt`, `UpdatedAt`). Never set them by hand: `AuditInterceptor` does it on save. Each `DbContext` registers it in `OnConfiguring`.
+- Every business entity inherits `AuditableEntity` (`CreatedAt`, `UpdatedAt` with private setters). `ApplicationUser` can't, so it implements `IAuditable` directly. `AuditInterceptor` sets both on save. Each `DbContext` registers it in `OnConfiguring`.
 - Money is a plain `decimal` (`numeric(10,2)`), not a value object. Every money column gets a `>= 0` check constraint named `CK_<Table>_<Column>` in its configuration.
 - A time that comes from a message gets its own column (`PlacedAt`, `RatedAt`, `SourceUpdatedAt`), never `CreatedAt` or `UpdatedAt`.
 - Keep `docs/erd-admin.*` and `docs/erd-client.*` in step with the entities in the same PR.
+- In Development, each app applies pending migrations on startup with `await app.MigrateDatabaseAsync<TContext>()`, right after `builder.Build()`. Other environments never migrate on startup.
 
 ## Tests
 

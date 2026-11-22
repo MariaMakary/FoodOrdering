@@ -3,7 +3,7 @@ using Shared.Persistence;
 
 namespace Admin.Web.Models.Entities;
 
-public class Order : IAuditable
+public class Order : AuditableEntity
 {
     public Guid Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
@@ -19,8 +19,6 @@ public class Order : IAuditable
     public decimal Total { get; set; }
     public DateTime? EstimatedDeliveryTime { get; set; }
     public DateTime PlacedAt { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
 
     public ICollection<OrderItem> Items { get; set; } = new List<OrderItem>();
     public ICollection<OrderStatusHistory> StatusHistory { get; set; } = new List<OrderStatusHistory>();
