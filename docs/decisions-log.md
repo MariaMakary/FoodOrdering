@@ -164,12 +164,12 @@ Declaring an exchange or queue that already exists with the same settings does n
 
 **Date:** 2026-11-22
 **Related tickets:** UNI-54 (Client ERD), UNI-55 (Admin ERD), UNI-6 (Client EF Core)
-**Code:** `Shared.Persistence/` (`IAuditable`, `AuditInterceptor`)
+**Code:** `Shared.Persistence/` (`AuditableEntity`, `IAuditable`, `AuditInterceptor`)
 
 ### Decision
 
-- Every business table has `CreatedAt` and `UpdatedAt` (UTC). The entity implements `IAuditable`.
-- Nobody sets them by hand. `AuditInterceptor` sets both when a row is added, and only `UpdatedAt` when it changes. A change to `CreatedAt` in code is ignored.
+- Every business table has `CreatedAt` and `UpdatedAt` (UTC). The entity inherits `AuditableEntity`, which declares both once with private setters. `ApplicationUser` already inherits `IdentityUser<Guid>`, so it implements `IAuditable` directly.
+- Nobody sets them by hand, and the private setters make it impossible. `AuditInterceptor` sets both through EF when a row is added, and only `UpdatedAt` when it changes.
 - Each `DbContext` registers it in `OnConfiguring` with `optionsBuilder.AddInterceptors(AuditInterceptor.Instance)`, so the app, the tests and `dotnet ef` all use it.
 
 ### Which tables

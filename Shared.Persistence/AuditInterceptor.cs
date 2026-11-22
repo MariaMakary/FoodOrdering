@@ -39,13 +39,13 @@ public sealed class AuditInterceptor : SaveChangesInterceptor
         {
             if (entry.State == EntityState.Added)
             {
-                entry.Entity.CreatedAt = now;
-                entry.Entity.UpdatedAt = now;
+                entry.Property(e => e.CreatedAt).CurrentValue = now;
+                entry.Property(e => e.UpdatedAt).CurrentValue = now;
             }
             else if (entry.State == EntityState.Modified)
             {
                 entry.Property(e => e.CreatedAt).IsModified = false;
-                entry.Entity.UpdatedAt = now;
+                entry.Property(e => e.UpdatedAt).CurrentValue = now;
             }
         }
     }

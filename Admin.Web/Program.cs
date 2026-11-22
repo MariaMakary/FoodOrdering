@@ -1,6 +1,7 @@
 using Admin.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
+using Shared.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +16,11 @@ var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
 builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(adminDbConnection));
 
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    await app.MigrateDatabaseAsync<AdminDbContext>();
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

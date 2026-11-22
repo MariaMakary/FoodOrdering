@@ -76,18 +76,18 @@ If a setting is missing, the app stops at startup with a message like `RabbitMq:
 
 ### 4. Create the database tables
 
-The `dotnet-ef` tool is pinned in `dotnet-tools.json`. Restore it once, then apply the migrations:
+In Development, each app applies its pending migrations when it starts (`MigrateDatabaseAsync` in `Shared.Persistence`), so `dotnet run` is enough, including after pulling someone else's migration. The log shows which migrations were applied.
+
+The `dotnet-ef` tool is pinned in `dotnet-tools.json`. Restore it once to add migrations or reset the database:
 
 ```bash
 dotnet tool restore
-dotnet ef database update --project Admin.Web
 ```
 
-Run `database update` again whenever someone adds a new migration. To start over with an empty database:
+To start over with an empty database, drop it and run the app again:
 
 ```bash
 dotnet ef database drop --force --project Admin.Web
-dotnet ef database update --project Admin.Web
 ```
 
 To add a migration after changing an entity or configuration:

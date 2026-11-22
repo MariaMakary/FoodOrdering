@@ -2,7 +2,7 @@ using Shared.Persistence;
 
 namespace Admin.Web.Models.Entities;
 
-public class MenuItem : IAuditable
+public class MenuItem : AuditableEntity
 {
     public Guid Id { get; set; }
     public Guid CategoryId { get; set; }
@@ -13,8 +13,6 @@ public class MenuItem : IAuditable
     public bool IsVegetarian { get; set; }
     public bool IsAvailable { get; set; } = true;
     public bool IsDeleted { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
 
     public Category Category { get; set; } = null!;
     public ICollection<MenuItemExtra> Extras { get; set; } = new List<MenuItemExtra>();
