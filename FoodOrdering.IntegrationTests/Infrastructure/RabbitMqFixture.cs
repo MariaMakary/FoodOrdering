@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Shared.Messaging;
 using Testcontainers.RabbitMq;
@@ -14,7 +15,7 @@ public sealed class RabbitMqFixture : IAsyncLifetime
         .WithPassword("test")
         .Build();
 
-    public IHost CreateHost()
+    public IHost CreateHost(Action<IServiceCollection>? configure = null)
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
@@ -31,6 +32,7 @@ public sealed class RabbitMqFixture : IAsyncLifetime
         });
 
         builder.Services.AddRabbitMq(builder.Configuration);
+        configure?.Invoke(builder.Services);
         return builder.Build();
     }
 
