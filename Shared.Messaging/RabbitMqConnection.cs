@@ -39,6 +39,12 @@ public sealed class RabbitMqConnection(
         return await connection.CreateChannelAsync(cancellationToken: ct);
     }
 
+    public async Task<IChannel> CreateChannelAsync(CreateChannelOptions channelOptions, CancellationToken ct = default)
+    {
+        IConnection connection = await GetAsync(ct);
+        return await connection.CreateChannelAsync(channelOptions, ct);
+    }
+
     private async Task<IConnection> ConnectAsync(CancellationToken ct)
     {
         RabbitMqOptions settings = options.Value;
@@ -48,7 +54,10 @@ public sealed class RabbitMqConnection(
             Port = settings.Port,
             UserName = settings.Username,
             Password = settings.Password,
-            VirtualHost = settings.VirtualHost
+            VirtualHost = settings.VirtualHost,
+            AutomaticRecoveryEnabled = true,
+            TopologyRecoveryEnabled = true,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
         };
 
         int attempt = 0;
