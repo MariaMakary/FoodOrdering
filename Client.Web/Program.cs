@@ -7,7 +7,6 @@ using Shared.Persistence.Outbox;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
 builder.Services.AddControllersWithViews();
 
 builder.Services.AddRabbitMq(builder.Configuration);
@@ -18,6 +17,7 @@ var clientDbConnection = builder.Configuration.GetConnectionString("ClientDb")
 builder.Services.AddDbContext<ClientDbContext>(options => options.UseNpgsql(clientDbConnection));
 builder.Services.AddOutbox<ClientDbContext>();
 
+builder.Services.AddClientIdentity();
 builder.Services.AddClientServices();
 
 var app = builder.Build();
@@ -27,17 +27,18 @@ if (app.Environment.IsDevelopment())
     await app.MigrateDatabaseAsync<ClientDbContext>();
 }
 
-// Configure the HTTP request pipeline.
+await IdentitySeeder.SeedRolesAsync(app.Services);
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
 app.UseHttpsRedirection();
 app.UseRouting();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapStaticAssets();
