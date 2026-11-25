@@ -3,6 +3,7 @@ using Client.Web.Models.Identity;
 using Client.Web.Models.ViewModels;
 using Client.Web.Repositories;
 using Client.Web.Services;
+using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Shared.Contracts.Enums;
 using Shared.Contracts.Messages;
@@ -301,6 +302,238 @@ public class OrderServiceTests
         ServiceResult<CheckoutViewModel> result = await _service.GetCheckoutAsync(_customer.Id);
 
         result.Error.ShouldBe(OrderErrors.EmptyCart);
+    }
+
+    [Fact]
+    public async Task CancelOrderAsync_ShouldCancelTheOrderAndAddOneOrderCancelledToTheOutbox()
+    {
+        Order order = GivenOrder(OrderStatus.Placed);
+        OrderStatusHistory? history = null;
+        _orders.AddHistory(Arg.Do<OrderStatusHistory>(h => history = h));
+        OrderCancelled? cancelled = null;
+        _outbox.Add(Arg.Do<MessageBase>(m => cancelled = m as OrderCancelled));
+        DateTime before = DateTime.UtcNow;
+
+        ServiceResult result = await _service.CancelOrderAsync(order.Id, _customer.Id);
+
+        result.Succeeded.ShouldBeTrue();
+        order.Status.ShouldBe(OrderStatus.Cancelled);
+        order.LastStatusChangedAt.ShouldBeGreaterThanOrEqualTo(before);
+        history.ShouldNotBeNull();
+        history.OrderId.ShouldBe(order.Id);
+        history.Status.ShouldBe(OrderStatus.Cancelled);
+        history.ChangedAt.ShouldBe(order.LastStatusChangedAt);
+        _outbox.Received(1).Add(Arg.Any<MessageBase>());
+        cancelled.ShouldNotBeNull();
+        cancelled.OrderId.ShouldBe(order.Id);
+        cancelled.CorrelationId.ShouldBe(order.Id);
+        cancelled.Reason.ShouldBe("Cancelled by customer");
+        cancelled.CancelledAt.ShouldBe(order.LastStatusChangedAt);
+        await _orders.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(OrderStatus.Accepted)]
+    [InlineData(OrderStatus.Preparing)]
+    [InlineData(OrderStatus.Rejected)]
+    [InlineData(OrderStatus.Delivered)]
+    [InlineData(OrderStatus.Cancelled)]
+    public async Task CancelOrderAsync_ShouldRefuse_WhenTheOrderIsNoLongerPlaced(OrderStatus status)
+    {
+        Order order = GivenOrder(status);
+
+        ServiceResult result = await _service.CancelOrderAsync(order.Id, _customer.Id);
+
+        result.Error.ShouldBe(OrderErrors.CannotCancel);
+        order.Status.ShouldBe(status);
+        await AssertNothingWasCancelledAsync();
+    }
+
+    [Fact]
+    public async Task CancelOrderAsync_ShouldReturnNotFound_WhenTheOrderBelongsToAnotherCustomer()
+    {
+        Order order = GivenOrder(OrderStatus.Placed, Guid.NewGuid());
+
+        ServiceResult result = await _service.CancelOrderAsync(order.Id, _customer.Id);
+
+        result.Error.ShouldBe(OrderErrors.OrderNotFound);
+        order.Status.ShouldBe(OrderStatus.Placed);
+        await AssertNothingWasCancelledAsync();
+    }
+
+    [Fact]
+    public async Task CancelOrderAsync_ShouldReturnNotFound_WhenTheOrderDoesNotExist()
+    {
+        ServiceResult result = await _service.CancelOrderAsync(Guid.NewGuid(), _customer.Id);
+
+        result.Error.ShouldBe(OrderErrors.OrderNotFound);
+        await AssertNothingWasCancelledAsync();
+    }
+
+    [Fact]
+    public async Task CancelOrderAsync_ShouldFailAndDiscardTheChanges_WhenTheRestaurantChangedTheOrderAtTheSameTime()
+    {
+        Order order = GivenOrder(OrderStatus.Placed);
+        _orders.SaveChangesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new DbUpdateConcurrencyException("The order was changed by another writer.")));
+
+        ServiceResult result = await _service.CancelOrderAsync(order.Id, _customer.Id);
+
+        result.Error.ShouldNotBeNull();
+        result.Error.ShouldBe(OrderErrors.ChangedByRestaurant);
+        result.Error.Message.ShouldStartWith("The restaurant has just updated your order");
+        Received.InOrder(() =>
+        {
+            _orders.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _orders.DiscardChanges();
+        });
+    }
+
+    [Fact]
+    public async Task GetCustomerOrdersAsync_ShouldMapEveryOrderInTheOrderTheRepositoryReturns()
+    {
+        Order newer = NewOrder(OrderStatus.Accepted, _customer.Id, "FO-1001");
+        Order older = NewOrder(OrderStatus.Delivered, _customer.Id, "FO-1000");
+        _orders.GetCustomerOrdersAsync(_customer.Id, Arg.Any<CancellationToken>()).Returns([newer, older]);
+
+        IReadOnlyList<OrderListItemViewModel> result = await _service.GetCustomerOrdersAsync(_customer.Id);
+
+        result.Select(o => o.OrderNumber).ShouldBe(["FO-1001", "FO-1000"]);
+        OrderListItemViewModel first = result[0];
+        first.Id.ShouldBe(newer.Id);
+        first.Total.ShouldBe(newer.Total);
+        first.Status.ShouldBe(OrderStatus.Accepted);
+        first.PaymentStatus.ShouldBe(PaymentStatus.CashOnDelivery);
+    }
+
+    [Fact]
+    public async Task GetOrderDetailsAsync_ShouldReturnNull_WhenTheOrderBelongsToAnotherCustomer()
+    {
+        Order order = NewOrder(OrderStatus.Placed, Guid.NewGuid());
+        _orders.GetOrderWithDetailsAsync(order.Id, Arg.Any<CancellationToken>()).Returns(order);
+
+        OrderDetailsViewModel? result = await _service.GetOrderDetailsAsync(order.Id, _customer.Id);
+
+        result.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetOrderDetailsAsync_ShouldMapItemsExtrasAndHistory()
+    {
+        Order order = NewDetailedOrder(OrderStatus.Placed);
+
+        OrderDetailsViewModel? result = await _service.GetOrderDetailsAsync(order.Id, _customer.Id);
+
+        result.ShouldNotBeNull();
+        result.Id.ShouldBe(order.Id);
+        result.OrderNumber.ShouldBe(order.OrderNumber);
+        result.Items.Count.ShouldBe(2);
+        OrderItemViewModel burger = result.Items.Single(i => i.MenuItemId == _burger.Id);
+        burger.Extras.Select(e => (e.Name, e.Price)).ShouldBe([("Bacon", 1.50m), ("Extra cheese", 1.00m)]);
+        burger.LineTotal.ShouldBe(24.00m);
+        result.StatusHistory.Select(h => h.Status).ShouldBe([OrderStatus.Placed]);
+        result.CanCancel.ShouldBeTrue();
+        result.CanRate.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(OrderStatus.Placed, true)]
+    [InlineData(OrderStatus.Accepted, false)]
+    [InlineData(OrderStatus.Delivered, false)]
+    [InlineData(OrderStatus.Cancelled, false)]
+    public async Task GetOrderDetailsAsync_ShouldAllowCancelOnlyWhilePlaced(OrderStatus status, bool canCancel)
+    {
+        Order order = NewDetailedOrder(status);
+
+        OrderDetailsViewModel? result = await _service.GetOrderDetailsAsync(order.Id, _customer.Id);
+
+        result.ShouldNotBeNull();
+        result.CanCancel.ShouldBe(canCancel);
+    }
+
+    [Fact]
+    public async Task GetOrderDetailsAsync_ShouldAllowRating_WhenTheOrderIsDeliveredAndADishIsNotRatedYet()
+    {
+        Order order = NewDetailedOrder(OrderStatus.Delivered);
+        order.Ratings.Add(new Rating { Id = Guid.NewGuid(), OrderId = order.Id, MenuItemId = _burger.Id, Stars = 5 });
+
+        OrderDetailsViewModel? result = await _service.GetOrderDetailsAsync(order.Id, _customer.Id);
+
+        result.ShouldNotBeNull();
+        result.CanRate.ShouldBeTrue();
+        result.Items.Single(i => i.MenuItemId == _burger.Id).IsRated.ShouldBeTrue();
+        result.Items.Single(i => i.MenuItemId == _lemonade.Id).IsRated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetOrderDetailsAsync_ShouldNotAllowRating_WhenEveryDishIsRated()
+    {
+        Order order = NewDetailedOrder(OrderStatus.Delivered);
+        order.Ratings.Add(new Rating { Id = Guid.NewGuid(), OrderId = order.Id, MenuItemId = _burger.Id, Stars = 5 });
+        order.Ratings.Add(new Rating { Id = Guid.NewGuid(), OrderId = order.Id, MenuItemId = _lemonade.Id, Stars = 4 });
+
+        OrderDetailsViewModel? result = await _service.GetOrderDetailsAsync(order.Id, _customer.Id);
+
+        result.ShouldNotBeNull();
+        result.CanRate.ShouldBeFalse();
+    }
+
+    private Order GivenOrder(OrderStatus status, Guid? customerId = null)
+    {
+        Order order = NewOrder(status, customerId ?? _customer.Id);
+        _orders.GetOrderForUpdateAsync(order.Id, Arg.Any<CancellationToken>()).Returns(order);
+        return order;
+    }
+
+    private Order NewDetailedOrder(OrderStatus status)
+    {
+        Order order = NewOrder(status, _customer.Id);
+        Guid burgerLineId = Guid.NewGuid();
+        order.Items =
+        [
+            new OrderItem
+            {
+                Id = burgerLineId,
+                OrderId = order.Id,
+                MenuItemId = _burger.Id,
+                Name = "Chicken Burger",
+                UnitPrice = 9.50m,
+                Quantity = 2,
+                Extras =
+                [
+                    new OrderItemExtra { Id = Guid.NewGuid(), OrderItemId = burgerLineId, Name = "Extra cheese", Price = 1.00m },
+                    new OrderItemExtra { Id = Guid.NewGuid(), OrderItemId = burgerLineId, Name = "Bacon", Price = 1.50m }
+                ]
+            },
+            new OrderItem { Id = Guid.NewGuid(), OrderId = order.Id, MenuItemId = _lemonade.Id, Name = "Lemonade", UnitPrice = 3.00m, Quantity = 1 }
+        ];
+        order.StatusHistory =
+        [
+            new OrderStatusHistory { Id = Guid.NewGuid(), OrderId = order.Id, Status = OrderStatus.Placed, ChangedAt = order.LastStatusChangedAt }
+        ];
+        _orders.GetOrderWithDetailsAsync(order.Id, Arg.Any<CancellationToken>()).Returns(order);
+        return order;
+    }
+
+    private static Order NewOrder(OrderStatus status, Guid customerId, string orderNumber = "FO-1000") => new()
+    {
+        Id = Guid.NewGuid(),
+        OrderNumber = orderNumber,
+        CustomerId = customerId,
+        DeliveryType = DeliveryType.Delivery,
+        Address = "Hamra Street 12, Beirut",
+        PaymentMethod = PaymentMethod.Cash,
+        PaymentStatus = PaymentStatus.CashOnDelivery,
+        Status = status,
+        Total = 27.00m,
+        LastStatusChangedAt = new DateTime(2026, 11, 24, 12, 30, 0, DateTimeKind.Utc)
+    };
+
+    private async Task AssertNothingWasCancelledAsync()
+    {
+        _orders.DidNotReceive().AddHistory(Arg.Any<OrderStatusHistory>());
+        _outbox.DidNotReceive().Add(Arg.Any<MessageBase>());
+        await _orders.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     private async Task AssertNothingWasPlacedAsync()

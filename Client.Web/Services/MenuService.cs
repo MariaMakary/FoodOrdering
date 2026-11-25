@@ -21,7 +21,7 @@ public class MenuService(IMenuRepository menu) : IMenuService
 
         return new MenuIndexViewModel
         {
-            Categories = categories.Select(c => new MenuCategoryViewModel { Id = c.Id, Name = c.Name }).ToList(),
+            Categories = categories.Select(ToCategory).ToList(),
             Dishes = dishes.Select(ToDishCard).ToList(),
             SelectedCategoryId = categoryId,
             Search = trimmedSearch,
@@ -67,6 +67,38 @@ public class MenuService(IMenuRepository menu) : IMenuService
                 .ToList()
         };
     }
+
+    public async Task<List<DishCardViewModel>> GetFeaturedAsync(
+        int count = HomeViewModel.FeaturedDishesCount,
+        CancellationToken ct = default)
+    {
+        if (count <= 0)
+        {
+            return [];
+        }
+
+        List<MenuItem> dishes = await menu.GetFeaturedAsync(count, ct);
+        return dishes.Select(ToDishCard).ToList();
+    }
+
+    public async Task<HomeViewModel> GetHomeAsync(CancellationToken ct = default)
+    {
+        List<Category> categories = await menu.GetCategoriesAsync(ct);
+        List<DishCardViewModel> featured = await GetFeaturedAsync(HomeViewModel.FeaturedDishesCount, ct);
+
+        return new HomeViewModel
+        {
+            Categories = categories.Select(ToCategory).ToList(),
+            FeaturedDishes = featured,
+            Recommendations = []
+        };
+    }
+
+    private static MenuCategoryViewModel ToCategory(Category category) => new()
+    {
+        Id = category.Id,
+        Name = category.Name
+    };
 
     private static DishCardViewModel ToDishCard(MenuItem dish) => new()
     {
