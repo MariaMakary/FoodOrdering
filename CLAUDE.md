@@ -35,7 +35,7 @@ Follow [README.md](README.md): `docker compose up -d`, create `appsettings.Devel
 | `Options/` | Settings classes used by only this app (e.g. `StripeOptions`) |
 
 - Register every service and repository in `ServiceExtensions.cs` (`AddClientServices()` / `AddAdminServices()`), not in `Program.cs`. Use `AddScoped`, the same lifetime as the `DbContext`.
-- `IExampleService` and `IExampleRepository` only show the pattern. Delete them in the PR that adds the first real service.
+- `IExampleService` and `IExampleRepository` in `Admin.Web` only show the pattern. Delete them in the PR that adds Admin's first real service (Client's were deleted in UNI-63).
 
 ## Code rules
 
@@ -112,7 +112,13 @@ Hubs live in `Hubs/`. Consumers and services send events through `IHubContext<TH
 
 Both apps use ASP.NET Core Identity with cookies (no JWT).
 
-**Client** has one role, `Customer`.
+- Each app registers Identity in `ServiceExtensions.cs` (`AddClientIdentity()`), not in `Program.cs`, so the tests use the same settings.
+- **Each app has its own auth cookie name** (`FoodOrdering.Client.Auth`, `FoodOrdering.Admin.Auth`). Browsers share cookies across ports on `localhost`, so with the default name, logging in to one app would log you out of the other.
+- Roles are seeded on startup in every environment by `Data/IdentitySeeder.cs`, only if they don't exist.
+- Write role names with the constants (`ClientRoles.Customer`), never as a typed string.
+- Controllers call `IAccountService`, never `UserManager` or `SignInManager` directly.
+
+**Client** has one role, `Customer`. Every new user gets it when they register. Password rules: at least 8 characters with an uppercase letter, a lowercase letter and a digit. 5 wrong passwords lock the account for 5 minutes.
 
 | Controller | Access |
 |---|---|
