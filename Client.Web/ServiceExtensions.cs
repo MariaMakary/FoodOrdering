@@ -1,5 +1,6 @@
 using Client.Web.Data;
 using Client.Web.Models.Identity;
+using Client.Web.Repositories;
 using Client.Web.Services;
 using Microsoft.AspNetCore.Identity;
 
@@ -38,6 +39,8 @@ public static class ServiceExtensions
     public static IServiceCollection AddClientServices(this IServiceCollection services)
     {
         services.AddScoped<IAccountService, AccountService>();
+        services.AddScoped<IMenuRepository, MenuRepository>();
+        services.AddScoped<IMenuService, MenuService>();
 
         return services;
     }
