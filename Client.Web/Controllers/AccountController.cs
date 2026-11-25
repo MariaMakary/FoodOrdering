@@ -10,6 +10,8 @@ namespace Client.Web.Controllers;
 
 public class AccountController(IAccountService accounts) : Controller
 {
+    public const string SuccessKey = "Success";
+
     [HttpGet]
     [AllowAnonymous]
     public IActionResult Register()
@@ -38,11 +40,7 @@ public class AccountController(IAccountService accounts) : Controller
             return RedirectToHome();
         }
 
-        foreach (IdentityError error in result.Errors)
-        {
-            ModelState.AddModelError(string.Empty, error.Description);
-        }
-
+        AddErrors(result);
         return View(model);
     }
 
@@ -93,6 +91,90 @@ public class AccountController(IAccountService accounts) : Controller
     {
         await accounts.LogoutAsync();
         return RedirectToHome();
+    }
+
+    [HttpGet]
+    [Authorize(Roles = ClientRoles.Customer)]
+    public async Task<IActionResult> Profile()
+    {
+        ProfileViewModel? profile = await accounts.GetProfileAsync(User);
+        if (profile is null)
+        {
+            return await SignOutMissingUserAsync();
+        }
+
+        return View(profile);
+    }
+
+    [HttpPost]
+    [Authorize(Roles = ClientRoles.Customer)]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Profile(ProfileViewModel model)
+    {
+        if (ModelState.IsValid)
+        {
+            IdentityResult result = await accounts.UpdateProfileAsync(User, model);
+            if (result.Succeeded)
+            {
+                TempData[SuccessKey] = "Your profile was saved.";
+                return RedirectToAction(nameof(Profile));
+            }
+
+            AddErrors(result);
+        }
+
+        ProfileViewModel? current = await accounts.GetProfileAsync(User);
+        if (current is null)
+        {
+            return await SignOutMissingUserAsync();
+        }
+
+        model.Email = current.Email;
+        return View(model);
+    }
+
+    [HttpGet]
+    [Authorize(Roles = ClientRoles.Customer)]
+    public IActionResult ChangePassword() => View(new ChangePasswordViewModel());
+
+    [HttpPost]
+    [Authorize(Roles = ClientRoles.Customer)]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ChangePassword(ChangePasswordViewModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+
+        IdentityResult result = await accounts.ChangePasswordAsync(User, model);
+        if (result.Succeeded)
+        {
+            TempData[SuccessKey] = "Your password was changed.";
+            return RedirectToAction(nameof(ChangePassword));
+        }
+
+        if (result.Errors.Any(e => e.Code == AccountErrors.UserNotFound))
+        {
+            return await SignOutMissingUserAsync();
+        }
+
+        AddErrors(result);
+        return View(new ChangePasswordViewModel());
+    }
+
+    private void AddErrors(IdentityResult result)
+    {
+        foreach (IdentityError error in result.Errors)
+        {
+            ModelState.AddModelError(string.Empty, error.Description);
+        }
+    }
+
+    private async Task<IActionResult> SignOutMissingUserAsync()
+    {
+        await accounts.LogoutAsync();
+        return RedirectToAction(nameof(Login));
     }
 
     private RedirectToActionResult RedirectToHome() =>
