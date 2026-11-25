@@ -6,6 +6,7 @@ using Client.Web.Services;
 using FoodOrdering.IntegrationTests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Shared.Contracts.Enums;
 using Shared.Contracts.Messages;
 using Shared.Persistence.Outbox;
@@ -165,6 +166,164 @@ public class OrderServiceTests(PostgresFixture postgres)
         (await check.Set<OutboxMessage>().CountAsync()).ShouldBe(2);
     }
 
+    [Fact]
+    public async Task GetOrderDetailsAsync_ShouldReturnNull_WhenTheOrderBelongsToAnotherCustomer()
+    {
+        string connectionString = await SeedCustomersAsync();
+        Guid omarsOrderId = await SeedOrderAsync(connectionString, _seed.Omar.Id, "FO-1000", OrderStatus.Placed);
+
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        OrderService service = NewService(context);
+
+        (await service.GetOrderDetailsAsync(omarsOrderId, _seed.Sara.Id)).ShouldBeNull();
+        (await service.CancelOrderAsync(omarsOrderId, _seed.Sara.Id)).Error.ShouldBe(OrderErrors.OrderNotFound);
+
+        OrderDetailsViewModel? own = await service.GetOrderDetailsAsync(omarsOrderId, _seed.Omar.Id);
+        own.ShouldNotBeNull();
+        own.Status.ShouldBe(OrderStatus.Placed);
+        OrderItemViewModel burger = own.Items.ShouldHaveSingleItem();
+        burger.Extras.Select(e => e.Name).ShouldBe(["Bacon", "Extra cheese"]);
+        own.StatusHistory.ShouldHaveSingleItem().Status.ShouldBe(OrderStatus.Placed);
+        own.CanCancel.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task GetCustomerOrdersAsync_ShouldReturnOnlyTheCustomersOwnOrdersNewestFirst()
+    {
+        string connectionString = await SeedCustomersAsync();
+        await SeedOrderAsync(connectionString, _seed.Sara.Id, "FO-1000", OrderStatus.Delivered);
+        await SeedOrderAsync(connectionString, _seed.Omar.Id, "FO-1001", OrderStatus.Placed);
+        await SeedOrderAsync(connectionString, _seed.Sara.Id, "FO-1002", OrderStatus.Accepted);
+        await SeedOrderAsync(connectionString, _seed.Sara.Id, "FO-1003", OrderStatus.Placed);
+
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        IReadOnlyList<OrderListItemViewModel> orders = await NewService(context).GetCustomerOrdersAsync(_seed.Sara.Id);
+
+        orders.Select(o => o.OrderNumber).ShouldBe(["FO-1003", "FO-1002", "FO-1000"]);
+        orders.Select(o => o.Status).ShouldBe([OrderStatus.Placed, OrderStatus.Accepted, OrderStatus.Delivered]);
+        context.ChangeTracker.Entries().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task CancelOrderAsync_ShouldSaveTheStatusTheHistoryRowAndOneOutboxRowInOneSave()
+    {
+        string connectionString = await SeedCustomersAsync();
+        Guid orderId = await SeedOrderAsync(connectionString, _seed.Sara.Id, "FO-1000", OrderStatus.Placed);
+
+        await using (ClientDbContext context = NewCountingContext(connectionString))
+        {
+            ServiceResult result = await NewService(context).CancelOrderAsync(orderId, _seed.Sara.Id);
+            result.Succeeded.ShouldBeTrue();
+        }
+
+        _saves.Count.ShouldBe(1);
+
+        await using ClientDbContext check = postgres.NewDbContext<ClientDbContext>(connectionString);
+        Order order = await check.Orders.Include(o => o.StatusHistory).SingleAsync(o => o.Id == orderId);
+        order.Status.ShouldBe(OrderStatus.Cancelled);
+        OrderStatusHistory cancelled = order.StatusHistory.Single(h => h.Status == OrderStatus.Cancelled);
+        cancelled.ChangedAt.ShouldBe(order.LastStatusChangedAt);
+
+        OutboxMessage row = await check.Set<OutboxMessage>().SingleAsync();
+        row.Type.ShouldBe(nameof(OrderCancelled));
+        row.CorrelationId.ShouldBe(orderId);
+        OrderCancelled message = row.ToMessage().ShouldBeOfType<OrderCancelled>();
+        message.OrderId.ShouldBe(orderId);
+        message.Reason.ShouldBe(OrderService.CancelReason);
+        message.CancelledAt.ShouldBe(order.LastStatusChangedAt, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public async Task CancelOrderAsync_ShouldReportTheRestaurantUpdate_WhenTheOrderIsAcceptedBetweenLoadAndSave()
+    {
+        string connectionString = await SeedCustomersAsync();
+        Guid orderId = await SeedOrderAsync(connectionString, _seed.Sara.Id, "FO-1000", OrderStatus.Placed);
+        var acceptBeforeSave = new BeforeFirstSave(async () =>
+        {
+            await using ClientDbContext consumerContext = postgres.NewDbContext<ClientDbContext>(connectionString);
+            var statusService = new OrderStatusService(
+                new OrderStatusRepository(consumerContext),
+                NullLogger<OrderStatusService>.Instance);
+            await statusService.ApplyStatusChangeAsync(new OrderStatusChanged
+            {
+                CorrelationId = orderId,
+                OrderId = orderId,
+                NewStatus = OrderStatus.Accepted,
+                EstimatedDeliveryTime = DateTime.UtcNow.AddMinutes(45),
+                ChangedAt = DateTime.UtcNow
+            });
+        });
+
+        await using (ClientDbContext context = NewContext(connectionString, acceptBeforeSave))
+        {
+            ServiceResult result = await NewService(context).CancelOrderAsync(orderId, _seed.Sara.Id);
+
+            result.Error.ShouldBe(OrderErrors.ChangedByRestaurant);
+            context.ChangeTracker.Entries().ShouldBeEmpty();
+        }
+
+        acceptBeforeSave.Ran.ShouldBeTrue();
+
+        await using ClientDbContext check = postgres.NewDbContext<ClientDbContext>(connectionString);
+        Order order = await check.Orders.Include(o => o.StatusHistory).SingleAsync(o => o.Id == orderId);
+        order.Status.ShouldBe(OrderStatus.Accepted);
+        order.StatusHistory.Select(h => h.Status).OrderBy(s => s).ShouldBe([OrderStatus.Placed, OrderStatus.Accepted]);
+        (await check.Set<OutboxMessage>().CountAsync()).ShouldBe(0);
+    }
+
+    private async Task<string> SeedCustomersAsync()
+    {
+        string connectionString = postgres.NewDatabaseConnectionString();
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        await context.Database.EnsureCreatedAsync();
+        await _seed.SaveAsync(context);
+        return connectionString;
+    }
+
+    private async Task<Guid> SeedOrderAsync(string connectionString, Guid customerId, string orderNumber, OrderStatus status)
+    {
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        DateTime placedAt = DateTime.UtcNow;
+        Guid orderId = Guid.NewGuid();
+        Guid itemId = Guid.NewGuid();
+        context.Orders.Add(new Order
+        {
+            Id = orderId,
+            OrderNumber = orderNumber,
+            CustomerId = customerId,
+            DeliveryType = DeliveryType.Delivery,
+            Address = "Hamra Street 12, Beirut",
+            PaymentMethod = PaymentMethod.Cash,
+            PaymentStatus = PaymentStatus.CashOnDelivery,
+            Status = status,
+            Total = 24.00m,
+            LastStatusChangedAt = placedAt,
+            Items =
+            [
+                new OrderItem
+                {
+                    Id = itemId,
+                    OrderId = orderId,
+                    MenuItemId = _seed.ChickenBurger.Id,
+                    Name = "Chicken Burger",
+                    UnitPrice = 9.50m,
+                    Quantity = 2,
+                    Extras =
+                    [
+                        new OrderItemExtra { Id = Guid.NewGuid(), OrderItemId = itemId, Name = "Extra cheese", Price = 1.00m },
+                        new OrderItemExtra { Id = Guid.NewGuid(), OrderItemId = itemId, Name = "Bacon", Price = 1.50m }
+                    ]
+                }
+            ],
+            StatusHistory =
+            [
+                new OrderStatusHistory { Id = Guid.NewGuid(), OrderId = orderId, Status = OrderStatus.Placed, ChangedAt = placedAt }
+            ]
+        });
+        await context.SaveChangesAsync();
+        return orderId;
+    }
+
     private async Task<string> SeedWithCartAsync()
     {
         string connectionString = postgres.NewDatabaseConnectionString();
@@ -188,11 +347,13 @@ public class OrderServiceTests(PostgresFixture postgres)
         return connectionString;
     }
 
-    private ClientDbContext NewCountingContext(string connectionString)
+    private ClientDbContext NewCountingContext(string connectionString) => NewContext(connectionString, _saves);
+
+    private static ClientDbContext NewContext(string connectionString, IInterceptor interceptor)
     {
         DbContextOptions<ClientDbContext> options = new DbContextOptionsBuilder<ClientDbContext>()
             .UseNpgsql(connectionString)
-            .AddInterceptors(_saves)
+            .AddInterceptors(interceptor)
             .Options;
         return new ClientDbContext(options);
     }
@@ -207,6 +368,25 @@ public class OrderServiceTests(PostgresFixture postgres)
         Notes = "Please ring twice",
         PaymentMethod = paymentMethod
     };
+
+    private sealed class BeforeFirstSave(Func<Task> action) : SaveChangesInterceptor
+    {
+        public bool Ran { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Ran)
+            {
+                Ran = true;
+                await action();
+            }
+
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
 
     private sealed class SaveCounter : SaveChangesInterceptor
     {

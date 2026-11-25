@@ -1,3 +1,4 @@
+using Client.Web.Hubs;
 using Client.Web.Models.Entities;
 using Client.Web.Repositories;
 using Shared.Contracts.Enums;
@@ -5,7 +6,10 @@ using Shared.Contracts.Messages;
 
 namespace Client.Web.Services;
 
-public class OrderStatusService(IOrderStatusRepository orders, ILogger<OrderStatusService> logger) : IOrderStatusService
+public class OrderStatusService(
+    IOrderStatusRepository orders,
+    IOrderNotifier notifier,
+    ILogger<OrderStatusService> logger) : IOrderStatusService
 {
     public const string CancelRefusedNote = "The restaurant had already accepted your order, so it could not be cancelled.";
 
@@ -51,5 +55,21 @@ public class OrderStatusService(IOrderStatusRepository orders, ILogger<OrderStat
 
         logger.LogInformation("Order {OrderId} changed from {PreviousStatus} to {NewStatus}",
             order.Id, previousStatus, message.NewStatus);
+
+        await NotifyCustomerAsync(order, ct);
+    }
+
+    private async Task NotifyCustomerAsync(Order order, CancellationToken ct)
+    {
+        try
+        {
+            await notifier.OrderStatusUpdatedAsync(order.CustomerId, order.Id, order.Status, order.EstimatedDeliveryTime, ct);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception,
+                "Order {OrderId} was saved as {NewStatus} but the live update to customer {CustomerId} could not be sent",
+                order.Id, order.Status, order.CustomerId);
+        }
     }
 }

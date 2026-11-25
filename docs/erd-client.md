@@ -10,14 +10,16 @@
 - **Identity tables drop the `AspNet` prefix:** `Users`, `Roles`, `UserRoles`, `UserClaims`, `UserLogins`, `UserTokens`, `RoleClaims` (renamed in `OnModelCreating`). The only role is `Customer`.
 - **No foreign keys to the Admin database.** `MenuItem`, `MenuItemExtra` and `Category` are a copy of the Admin menu and keep the **Admin Ids** from `MenuItemUpdated`, so `OrderPlaced.items[].menuItemId` and `DishRated.menuItemId` match Admin's rows.
 - **Audit columns ([DEC-003](decisions-log.md)):** every business table has `CreatedAt` and `UpdatedAt`, set on save by `AuditInterceptor` from `Shared.Persistence`. Never set them by hand. Not on the join tables, `OrderStatusHistory` or the messaging tables.
-- **The menu is read-only for Client.** Only the `MenuItemUpdated` consumer writes `MenuItem`, `MenuItemExtra` and `Category`. Admin's `updatedAt` is stored in `MenuItem.SourceUpdatedAt`, and a message is applied only when its `updatedAt >= SourceUpdatedAt`. `UpdatedAt` is the Client's own audit time and is never compared with Admin's.
+- **The menu is read-only for Client.** Only the `MenuItemUpdated` consumer writes `MenuItem`, `MenuItemExtra` and `Category`. Admin's `updatedAt` is stored in `MenuItem.SourceUpdatedAt`, and a message is applied only when its `updatedAt > SourceUpdatedAt` (an equal time is the same update again, so it is ignored). `UpdatedAt` is the Client's own audit time and is never compared with Admin's.
 - **`Order` and `MenuItem` use optimistic concurrency** with PostgreSQL's `xmin`. `Order` is changed by the customer (cancel, payment) and by the `OrderStatusChanged` consumer. `MenuItem` can get two `MenuItemUpdated` messages at once. The second save throws `DbUpdateConcurrencyException`, which is retried.
+- **The menu is read-only for Client.** Only the `MenuItemUpdated` consumer writes `MenuItem`, `MenuItemExtra` and `Category`. Admin's `updatedAt` is stored in `MenuItem.SourceUpdatedAt`, and a message is applied only when its `updatedAt >= SourceUpdatedAt`. `UpdatedAt` is the Client's own audit time and is never compared with Admin's.
+- **`Order` and `MenuItem` use optimistic concurrency** with PostgreSQL's `xmin`. `Order` is changed by the customer (cancel, payment) and by the `OrderStatusChanged` consumer. `MenuItem` can get two `MenuItemUpdated` messages at once. The second save throws `DbUpdateConcurrencyException`. A consumer retries the message. The customer's cancel is not retried: nothing is saved and the order page shows "The restaurant has just updated your order" (UNI-69).
 - **Out-of-order status messages (DEC-002):** `Order.LastStatusChangedAt` holds the `changedAt` of the last applied `OrderStatusChanged`. A message whose `changedAt` is not newer is ignored, unless the order shows `Cancelled` (Admin owns the status, DEC-001).
 - **Order lines are copies.** `OrderItem` and `OrderItemExtra` store the name and price **at checkout**, so later menu changes never change an old order.
 - **`OrderNumber`** is `FO-<number>`, taken from the PostgreSQL sequence `OrderNumbers` (starts at 1000), and unique.
 - **Money** is `numeric(10,2)`, never negative: every money column has a `>= 0` check constraint (`CK_<Table>_<Column>`), the same as Admin. **Times** are UTC `timestamptz`, always `DateTime.UtcNow`.
 - **Enums** (`OrderStatus`, `PaymentStatus`, `DeliveryType`, `PaymentMethod`) are stored as strings, the same as in the messages. `PaymentAttemptStatus` (`Pending`, `Succeeded`, `Failed`) is a Client-only enum in `Client.Web/Models/Enums`.
-- **Menu items are never really deleted.** `MenuItemUpdated` with `Deleted` sets `IsDeleted = true`, because old orders and ratings still point to them. Extras that disappear from the list are deleted, and their `CartItemExtra` rows are deleted with them (cascade).
+- **Menu items are never really deleted.** `MenuItemUpdated` with `Deleted` sets `IsDeleted = true`, because old orders and ratings still point to them. Extras are matched by their Admin `id`: kept extras are updated in place (so carts keep pointing to them), new ones are added, and extras that disappear from the list are deleted, and their `CartItemExtra` rows are deleted with them (cascade). The cart line itself stays, without that extra.
 
 ## Tables
 
@@ -89,7 +91,7 @@ Also: `Payment.Status = Succeeded`, `Order.PaymentStatus = Paid`.
 | `reason` | `OrderStatusHistory.Note` |
 | `cancelledAt` | `OrderStatusHistory.ChangedAt` and `Order.LastStatusChangedAt` |
 
-Also: `Order.Status = Cancelled`. If Admin had already accepted it, Admin's `OrderStatusChanged` (newer `changedAt`) puts the real status back (DEC-001).
+Also: `Order.Status = Cancelled`. If Admin had already accepted it, Admin's `OrderStatusChanged` puts the real status back, even when its `changedAt` is older than the cancel (DEC-001). The Client always sends `reason` = "Cancelled by customer" (there is no reason field on the page yet).
 
 ### `DishRated` (sent when the customer rates a dish)
 
@@ -138,6 +140,6 @@ Also: `Delivered` on a cash order sets `Order.PaymentStatus = Paid`.
 1. `MenuItem`, `MenuItemExtra` and `Category` use the Admin Ids, so Admin can match `OrderPlaced` and `DishRated` to its own menu without a lookup.
 2. `Category.SortOrder` sets the order of categories on the menu page. Admin owns it (new `SortOrder` column on the Admin `Category`), and `MenuItemUpdated.category.sortOrder` copies it to Client.
 3. `customerName` and `customerPhone` are read from `Users` at checkout and are not copied onto `Order`. The outbox row keeps the exact values that were sent.
-4. `OrderStatusHistory.Note` holds the cancel reason the customer typed and the rejection reason. `Order.RejectionReason` is a copy of the latest rejection reason, so the order page doesn't need to search the history.
+4. `OrderStatusHistory.Note` holds the cancel reason ("Cancelled by customer") and the rejection reason. `Order.RejectionReason` is a copy of the latest rejection reason, so the order page doesn't need to search the history.
 5. `Payment` has `Method` (sent in `PaymentCompleted`) and a Client-only `Status` (`PaymentAttemptStatus`: Pending, Succeeded, Failed). A failed Stripe attempt updates the same row with a new `ProviderSessionId`.
 6. `Rating.CustomerId` repeats `Order.CustomerId`, so "my ratings" is one query.

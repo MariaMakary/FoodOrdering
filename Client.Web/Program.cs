@@ -1,5 +1,6 @@
 using Client.Web;
 using Client.Web.Data;
+using Client.Web.Hubs;
 using Client.Web.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
@@ -47,5 +48,6 @@ app.MapControllerRoute(
     pattern: "{controller=Home}/{action=Index}/{id?}")
     .WithStaticAssets();
 
+app.MapHub<OrderHub>(OrderHub.Path);
 
 app.Run();

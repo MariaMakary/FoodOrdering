@@ -20,6 +20,10 @@ public abstract partial class ErrorPagesTestsBase
 
     protected abstract void UseErrorPages(WebApplication app);
 
+    protected virtual void AddHomeControllerServices(IServiceCollection services)
+    {
+    }
+
     [Fact]
     public async Task UseErrorPages_ShouldShowTheFriendlyErrorPage_WhenAnActionThrowsOutsideDevelopment()
     {
@@ -129,6 +133,7 @@ public abstract partial class ErrorPagesTestsBase
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
         builder.Services.AddControllersWithViews().AddApplicationPart(typeof(FailingController).Assembly);
+        AddHomeControllerServices(builder.Services);
 
         WebApplication app = builder.Build();
         UseErrorPages(app);

@@ -2,6 +2,7 @@ using Client.Web.Models.Entities;
 using Client.Web.Models.Identity;
 using Client.Web.Models.ViewModels;
 using Client.Web.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Shared.Contracts.Enums;
 using Shared.Contracts.Messages;
 using Shared.Persistence.Outbox;
@@ -11,6 +12,7 @@ namespace Client.Web.Services;
 public class OrderService(IOrderRepository orders, ICartRepository carts, IOutbox outbox) : IOrderService
 {
     public const string OrderNumberPrefix = "FO-";
+    public const string CancelReason = "Cancelled by customer";
 
     public async Task<ServiceResult<CheckoutViewModel>> GetCheckoutAsync(Guid customerId, CancellationToken ct = default)
     {
@@ -78,6 +80,132 @@ public class OrderService(IOrderRepository orders, ICartRepository carts, IOutbo
         await orders.SaveChangesAsync(ct);
 
         return ServiceResult<Guid>.Success(order.Id);
+    }
+
+    public async Task<IReadOnlyList<OrderListItemViewModel>> GetCustomerOrdersAsync(
+        Guid customerId,
+        CancellationToken ct = default)
+    {
+        List<Order> customerOrders = await orders.GetCustomerOrdersAsync(customerId, ct);
+
+        return customerOrders
+            .Select(o => new OrderListItemViewModel
+            {
+                Id = o.Id,
+                OrderNumber = o.OrderNumber,
+                CreatedAt = o.CreatedAt,
+                Total = o.Total,
+                Status = o.Status,
+                PaymentStatus = o.PaymentStatus
+            })
+            .ToList();
+    }
+
+    public async Task<OrderDetailsViewModel?> GetOrderDetailsAsync(
+        Guid orderId,
+        Guid customerId,
+        CancellationToken ct = default)
+    {
+        Order? order = await orders.GetOrderWithDetailsAsync(orderId, ct);
+        if (order is null || order.CustomerId != customerId)
+        {
+            return null;
+        }
+
+        HashSet<Guid> ratedDishIds = order.Ratings.Select(r => r.MenuItemId).ToHashSet();
+        List<OrderItemViewModel> items = order.Items
+            .OrderBy(i => i.CreatedAt)
+            .ThenBy(i => i.Name)
+            .Select(i => ToItemViewModel(i, ratedDishIds))
+            .ToList();
+
+        return new OrderDetailsViewModel
+        {
+            Id = order.Id,
+            OrderNumber = order.OrderNumber,
+            CreatedAt = order.CreatedAt,
+            Status = order.Status,
+            DeliveryType = order.DeliveryType,
+            Address = order.Address,
+            Notes = order.Notes,
+            PaymentMethod = order.PaymentMethod,
+            PaymentStatus = order.PaymentStatus,
+            Total = order.Total,
+            EstimatedDeliveryTime = order.EstimatedDeliveryTime,
+            RejectionReason = order.RejectionReason,
+            Items = items,
+            StatusHistory = order.StatusHistory
+                .OrderBy(h => h.ChangedAt)
+                .Select(h => new OrderStatusHistoryViewModel { Status = h.Status, ChangedAt = h.ChangedAt, Note = h.Note })
+                .ToList(),
+            CanCancel = order.Status == OrderStatus.Placed,
+            CanRate = order.Status == OrderStatus.Delivered && items.Any(i => !i.IsRated)
+        };
+    }
+
+    public async Task<ServiceResult> CancelOrderAsync(Guid orderId, Guid customerId, CancellationToken ct = default)
+    {
+        Order? order = await orders.GetOrderForUpdateAsync(orderId, ct);
+        if (order is null || order.CustomerId != customerId)
+        {
+            return ServiceResult.Failure(OrderErrors.OrderNotFound);
+        }
+
+        if (order.Status != OrderStatus.Placed)
+        {
+            return ServiceResult.Failure(OrderErrors.CannotCancel);
+        }
+
+        DateTime cancelledAt = DateTime.UtcNow;
+        order.Status = OrderStatus.Cancelled;
+        order.LastStatusChangedAt = cancelledAt;
+        orders.AddHistory(new OrderStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            OrderId = order.Id,
+            Status = OrderStatus.Cancelled,
+            ChangedAt = cancelledAt,
+            Note = CancelReason
+        });
+        outbox.Add(new OrderCancelled
+        {
+            CreatedAt = cancelledAt,
+            CorrelationId = order.Id,
+            OrderId = order.Id,
+            Reason = CancelReason,
+            CancelledAt = cancelledAt
+        });
+
+        try
+        {
+            await orders.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            orders.DiscardChanges();
+            return ServiceResult.Failure(OrderErrors.ChangedByRestaurant);
+        }
+
+        return ServiceResult.Success();
+    }
+
+    private static OrderItemViewModel ToItemViewModel(OrderItem item, HashSet<Guid> ratedDishIds)
+    {
+        List<OrderItemExtraViewModel> extras = item.Extras
+            .OrderBy(e => e.Name)
+            .Select(e => new OrderItemExtraViewModel { Name = e.Name, Price = e.Price })
+            .ToList();
+
+        return new OrderItemViewModel
+        {
+            MenuItemId = item.MenuItemId,
+            Name = item.Name,
+            Extras = extras,
+            Quantity = item.Quantity,
+            UnitPrice = item.UnitPrice,
+            LineTotal = (item.UnitPrice + extras.Sum(e => e.Price)) * item.Quantity,
+            IsRated = ratedDishIds.Contains(item.MenuItemId)
+        };
     }
 
     private static Order NewOrder(

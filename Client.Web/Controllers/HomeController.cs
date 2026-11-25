@@ -1,16 +1,21 @@
 using System.Diagnostics;
 using Client.Web.Models;
+using Client.Web.Models.ViewModels;
+using Client.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Client.Web.Controllers;
 
-public class HomeController(ILogger<HomeController> logger) : Controller
+public class HomeController(IMenuService menu, ILogger<HomeController> logger) : Controller
 {
-    public IActionResult Index()
+    [AllowAnonymous]
+    [HttpGet]
+    public async Task<IActionResult> Index(CancellationToken ct)
     {
-        return View();
+        HomeViewModel model = await menu.GetHomeAsync(ct);
+        return View(model);
     }
 
     public IActionResult Privacy()
