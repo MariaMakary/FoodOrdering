@@ -1,4 +1,5 @@
 using Client.Web.Data;
+using Client.Web.Messaging.Consumers;
 using Client.Web.Models.Identity;
 using Client.Web.Repositories;
 using Client.Web.Services;
@@ -45,6 +46,10 @@ public static class ServiceExtensions
         services.AddScoped<ICartService, CartService>();
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IOrderService, OrderService>();
+        services.AddScoped<IOrderStatusRepository, OrderStatusRepository>();
+        services.AddScoped<IOrderStatusService, OrderStatusService>();
+
+        services.AddHostedService<OrderStatusChangedConsumer>();
 
         return services;
     }
