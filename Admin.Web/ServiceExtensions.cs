@@ -1,3 +1,4 @@
+using Admin.Web.Messaging.Consumers;
 using Admin.Web.Repositories;
 using Admin.Web.Services;
 
@@ -7,8 +8,10 @@ public static class ServiceExtensions
 {
     public static IServiceCollection AddAdminServices(this IServiceCollection services)
     {
-        services.AddScoped<IExampleRepository, ExampleRepository>();
-        services.AddScoped<IExampleService, ExampleService>();
+        services.AddScoped<IOrderRepository, OrderRepository>();
+        services.AddScoped<IOrderService, OrderService>();
+
+        services.AddHostedService<OrderPlacedConsumer>();
 
         return services;
     }
