@@ -146,7 +146,7 @@ Today every binding is an exact key, so topic behaves exactly like direct. Choos
 
 RabbitMQ keeps order only inside one queue. Each queue has its own consumer, so `PaymentCompleted` or `OrderCancelled` can be processed before the `OrderPlaced` of the same order, and Admin can't save a payment or a cancel for an order it doesn't have yet (foreign key to `Orders`).
 
-**Rule:** when a consumer receives a message for an order that doesn't exist yet, it retries the message (5 attempts, about 200 ms apart) before rejecting it to the dead-letter queue (UNI-17). The Client's `OrderStatusChanged` consumer ignores a message whose `changedAt` is older than the last one it applied for that order, so an older status never overwrites a newer one.
+**Rule:** when an Admin consumer receives a message for an order that doesn't exist yet (`PaymentCompleted`, `OrderCancelled` or `DishRated` arriving before `OrderPlaced`), it retries the message (5 attempts, about 200 ms apart) before rejecting it to the dead-letter queue (UNI-17). The Client creates every order itself, so its `OrderStatusChanged` consumer logs a warning and acks a message for an unknown order instead of retrying it. It also ignores a message whose `changedAt` is not newer than the last one it applied for that order, so an older status never overwrites a newer one, unless the Client shows `Cancelled`: Admin owns the status, so its message is applied over the customer's cancel (DEC-001).
 
 ### Why both apps declare everything
 
