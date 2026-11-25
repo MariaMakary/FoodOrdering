@@ -96,7 +96,7 @@ The full rules, the cancel race and the scenarios are DEC-001 in [docs/decisions
 
 - **Admin owns the order status.** The Client sets only `Placed` and `Cancelled`, and always applies Admin's `OrderStatusChanged`, even over its own `Cancelled`.
 - `Delivered`, `Rejected` and `Cancelled` are final.
-- The Client ignores an `OrderStatusChanged` older than `Order.LastStatusChangedAt`.
+- The Client ignores an `OrderStatusChanged` that is not newer than `Order.LastStatusChangedAt`, unless the Client shows `Cancelled`.
 
 ## Real-time (SignalR)
 
