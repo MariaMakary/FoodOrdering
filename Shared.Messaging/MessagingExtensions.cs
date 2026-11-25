@@ -16,6 +16,7 @@ public static class MessagingExtensions
             .ValidateOnStart();
 
         services.AddSingleton<RabbitMqConnection>();
+        services.AddSingleton<IMessagePublisher, RabbitMqPublisher>();
         services.AddHostedService<RabbitMqTopologyInitializer>();
 
         return services;
