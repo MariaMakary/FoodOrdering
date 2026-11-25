@@ -305,8 +305,8 @@ Sent when staff create, edit or delete a menu item. Client keeps its own copy of
 | `isVegetarian` | bool | yes | |
 | `isAvailable` | bool | yes | `false` = shown as "sold out", cannot be ordered |
 | `category` | `{ id, name, sortOrder }`? | not for `Deleted` | Client creates the category if it doesn't have it yet, and updates its name and `sortOrder` if they changed. `sortOrder` (int) is the position of the category on the menu, lowest first. |
-| `extras` | list of `{ id, name, price }` | yes | The **full** list. It replaces Client's list. `[]` if none. |
-| `updatedAt` | DateTime (UTC) | yes | Client ignores a message older than the `updatedAt` it already has for this item |
+| `extras` | list of `{ id, name, price }` | yes | The **full** list. It replaces Client's list, matched by `id`: an extra with a known `id` is updated, a new `id` is added, and an extra missing from the list is deleted. `[]` if none. An extra keeps the same `id` for as long as it exists in Admin. |
+| `updatedAt` | DateTime (UTC) | yes | Client ignores a message whose `updatedAt` is not newer than the one it already has for this item (an equal time is the same update again). Compared to the microsecond, the precision PostgreSQL stores. |
 
 Created / Updated:
 
@@ -358,6 +358,15 @@ Deleted:
 ```
 
 **Can Client do its job?** ✅ It can show the full menu with categories in the right order, photos, prices, the vegetarian badge and extras, and block sold-out dishes, without ever calling Admin. On `Deleted`, Client hides the item but keeps the row, because old orders and ratings still point to it.
+
+**How Client applies it (UNI-60):** `MenuItemUpdatedConsumer` → `MenuSyncService` → `MenuSyncRepository`.
+
+- `Created` and `Updated` are handled the same way: insert the dish if Client doesn't have it, otherwise update it. A `Created` for a dish Client already has is an update under the same `updatedAt` rule. A newer `Created` or `Updated` after a `Deleted` brings the dish back (`IsDeleted = false`).
+- `Created` or `Updated` without `name`, `price` or `category` is invalid: the consumer throws and the message goes to the `.error` queue.
+- `Deleted` sets `IsAvailable = false` and `IsDeleted = true` and keeps the row, the category and the extras. A `Deleted` for a dish Client never had is logged and ignored.
+- The category in an older (ignored) message is not applied either.
+- **An extra removed while it is in a cart:** the `CartItemExtra` row is deleted with it (database cascade). The cart line stays, with the remaining extras, and its price is read live, so it drops by the removed extra's price. Nothing is shown to the customer about it.
+- **A dish that becomes unavailable or deleted** stays in carts. The cart shows it as unavailable, and checkout refuses it (`CartMapping.IsOrderable`, UNI-67).
 
 ---
 

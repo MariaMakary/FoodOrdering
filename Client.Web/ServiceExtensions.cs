@@ -48,8 +48,11 @@ public static class ServiceExtensions
         services.AddScoped<IOrderService, OrderService>();
         services.AddScoped<IOrderStatusRepository, OrderStatusRepository>();
         services.AddScoped<IOrderStatusService, OrderStatusService>();
+        services.AddScoped<IMenuSyncRepository, MenuSyncRepository>();
+        services.AddScoped<IMenuSyncService, MenuSyncService>();
 
         services.AddHostedService<OrderStatusChangedConsumer>();
+        services.AddHostedService<MenuItemUpdatedConsumer>();
 
         return services;
     }
