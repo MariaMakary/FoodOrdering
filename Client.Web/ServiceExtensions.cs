@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization;
 using Client.Web.Data;
+using Client.Web.Hubs;
 using Client.Web.Messaging.Consumers;
 using Client.Web.Models.Identity;
 using Client.Web.Repositories;
@@ -49,7 +51,19 @@ public static class ServiceExtensions
         services.AddScoped<IOrderStatusRepository, OrderStatusRepository>();
         services.AddScoped<IOrderStatusService, OrderStatusService>();
 
+        services.AddClientSignalR();
+
         services.AddHostedService<OrderStatusChangedConsumer>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddClientSignalR(this IServiceCollection services)
+    {
+        services.AddSignalR()
+            .AddJsonProtocol(options =>
+                options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
+        services.AddSingleton<IOrderNotifier, OrderHubNotifier>();
 
         return services;
     }

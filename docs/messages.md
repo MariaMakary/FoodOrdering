@@ -288,6 +288,8 @@ Rejected:
 
 **Can Client do its job?** ✅ It updates the order the customer sees, shows the ETA after Accepted and the reason after Rejected, and turns off the Cancel button once the status is not `Placed`. Client can also work out payment for cash orders: `Delivered` means paid.
 
+After Client saves the change, it pushes the SignalR event `OrderStatusUpdated(orderId, newStatus, estimatedTime)` on `/hubs/orders` to the order's owner only (UNI-71). `estimatedTime` is the order's saved ETA, so it keeps the earlier ETA when this message has none. Nothing is pushed for an unknown order or a message that is not newer than the last change. The exact payload is in the "Real-time (SignalR)" section of `CLAUDE.md`.
+
 ---
 
 ## 6. `MenuItemUpdated` (Admin → Client)
