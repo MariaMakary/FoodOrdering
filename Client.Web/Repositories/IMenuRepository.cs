@@ -14,4 +14,6 @@ public interface IMenuRepository
     Task<List<Category>> GetCategoriesAsync(CancellationToken ct = default);
 
     Task<MenuItem?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    Task<List<MenuItem>> GetFeaturedAsync(int count, CancellationToken ct = default);
 }

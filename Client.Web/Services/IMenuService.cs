@@ -12,4 +12,10 @@ public interface IMenuService
         CancellationToken ct = default);
 
     Task<MenuItemDetailsViewModel?> GetDishDetailsAsync(Guid id, CancellationToken ct = default);
+
+    Task<List<DishCardViewModel>> GetFeaturedAsync(
+        int count = HomeViewModel.FeaturedDishesCount,
+        CancellationToken ct = default);
+
+    Task<HomeViewModel> GetHomeAsync(CancellationToken ct = default);
 }

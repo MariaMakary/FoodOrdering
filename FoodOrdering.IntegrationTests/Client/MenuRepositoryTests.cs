@@ -1,7 +1,10 @@
 using Client.Web.Data;
 using Client.Web.Models.Entities;
+using Client.Web.Models.Identity;
 using Client.Web.Repositories;
 using FoodOrdering.IntegrationTests.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+using Shared.Contracts.Enums;
 using Shouldly;
 
 namespace FoodOrdering.IntegrationTests.Client;
@@ -161,6 +164,143 @@ public class MenuRepositoryTests(PostgresFixture postgres)
         MenuItem? dish = await new MenuRepository(context).GetByIdAsync(deletedId);
 
         dish.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetFeaturedAsync_ShouldReturnOnlyAvailableDishesNewestFirst_WhenThereAreNoRatings()
+    {
+        await using ClientDbContext context = await SeedMenuAsync();
+        await SetCreatedAtAsync(context, "Lemonade", 1);
+        await SetCreatedAtAsync(context, "Caesar Salad", 2);
+        await SetCreatedAtAsync(context, "Greek Salad", 3);
+        await SetCreatedAtAsync(context, "Chicken Burger", 4);
+
+        List<MenuItem> dishes = await new MenuRepository(context).GetFeaturedAsync(6);
+
+        dishes.Select(d => d.Name).ShouldBe(["Chicken Burger", "Greek Salad", "Caesar Salad", "Lemonade"]);
+        dishes.ShouldAllBe(d => d.Category != null);
+    }
+
+    [Fact]
+    public async Task GetFeaturedAsync_ShouldReturnAtMostTheCount_WhenThereAreMoreDishes()
+    {
+        await using ClientDbContext context = await postgres.CreateDbContextAsync<ClientDbContext>();
+        context.Categories.Add(_burgers);
+        for (int i = 1; i <= 8; i++)
+        {
+            context.MenuItems.Add(NewDish(_burgers, $"Burger {i}", 9.00m));
+        }
+
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        List<MenuItem> dishes = await new MenuRepository(context).GetFeaturedAsync(6);
+
+        dishes.Count.ShouldBe(6);
+        dishes.ShouldAllBe(d => d.IsAvailable && !d.IsDeleted);
+    }
+
+    [Fact]
+    public async Task GetFeaturedAsync_ShouldPutTheTopRatedFirstAndUnratedAfter_WhenThereAreRatings()
+    {
+        await using ClientDbContext context = await SeedMenuAsync();
+        await SetCreatedAtAsync(context, "Lemonade", 1);
+        await SetCreatedAtAsync(context, "Caesar Salad", 2);
+        await SetCreatedAtAsync(context, "Greek Salad", 3);
+        await SetCreatedAtAsync(context, "Chicken Burger", 4);
+        ApplicationUser customer = await AddCustomerAsync(context);
+        await AddRatingAsync(context, customer, "Lemonade", 5);
+        await AddRatingAsync(context, customer, "Lemonade", 4);
+        await AddRatingAsync(context, customer, "Caesar Salad", 3);
+
+        List<MenuItem> dishes = await new MenuRepository(context).GetFeaturedAsync(6);
+
+        dishes.Select(d => d.Name).ShouldBe(["Lemonade", "Caesar Salad", "Chicken Burger", "Greek Salad"]);
+    }
+
+    [Fact]
+    public async Task GetFeaturedAsync_ShouldPutTheDishWithMoreRatingsFirst_WhenTheAveragesAreEqual()
+    {
+        await using ClientDbContext context = await SeedMenuAsync();
+        await SetCreatedAtAsync(context, "Lemonade", 1);
+        await SetCreatedAtAsync(context, "Greek Salad", 2);
+        ApplicationUser customer = await AddCustomerAsync(context);
+        await AddRatingAsync(context, customer, "Greek Salad", 4);
+        await AddRatingAsync(context, customer, "Lemonade", 4);
+        await AddRatingAsync(context, customer, "Lemonade", 4);
+
+        List<MenuItem> dishes = await new MenuRepository(context).GetFeaturedAsync(2);
+
+        dishes.Select(d => d.Name).ShouldBe(["Lemonade", "Greek Salad"]);
+    }
+
+    [Fact]
+    public async Task GetFeaturedAsync_ShouldLeaveOutUnavailableAndDeletedDishes_WhenTheyAreTopRated()
+    {
+        await using ClientDbContext context = await SeedMenuAsync();
+        ApplicationUser customer = await AddCustomerAsync(context);
+        await AddRatingAsync(context, customer, "Beef Burger", 5);
+        await AddRatingAsync(context, customer, "Old Burger", 5);
+        await AddRatingAsync(context, customer, "Lemonade", 1);
+
+        List<MenuItem> dishes = await new MenuRepository(context).GetFeaturedAsync(6);
+
+        dishes.Select(d => d.Name).ShouldNotContain("Beef Burger");
+        dishes.Select(d => d.Name).ShouldNotContain("Old Burger");
+        dishes.First().Name.ShouldBe("Lemonade");
+        dishes.Count.ShouldBe(4);
+    }
+
+    private static async Task SetCreatedAtAsync(ClientDbContext context, string dishName, int day)
+    {
+        var createdAt = new DateTime(2026, 1, day, 12, 0, 0, DateTimeKind.Utc);
+        await context.MenuItems
+            .Where(m => m.Name == dishName)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.CreatedAt, createdAt));
+    }
+
+    private static async Task<ApplicationUser> AddCustomerAsync(ClientDbContext context)
+    {
+        var customer = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            UserName = "sara@example.com",
+            Email = "sara@example.com",
+            FirstName = "Sara",
+            LastName = "Haddad"
+        };
+        context.Users.Add(customer);
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        return customer;
+    }
+
+    private static async Task AddRatingAsync(ClientDbContext context, ApplicationUser customer, string dishName, int stars)
+    {
+        Guid dishId = await context.MenuItems.Where(m => m.Name == dishName).Select(m => m.Id).SingleAsync();
+        var order = new Order
+        {
+            Id = Guid.NewGuid(),
+            OrderNumber = $"FO-{Guid.NewGuid():N}"[..20],
+            CustomerId = customer.Id,
+            DeliveryType = DeliveryType.Pickup,
+            PaymentMethod = PaymentMethod.Cash,
+            PaymentStatus = PaymentStatus.CashOnDelivery,
+            Status = OrderStatus.Delivered,
+            Total = 10.00m,
+            LastStatusChangedAt = DateTime.UtcNow
+        };
+        context.Orders.Add(order);
+        context.Ratings.Add(new Rating
+        {
+            Id = Guid.NewGuid(),
+            OrderId = order.Id,
+            MenuItemId = dishId,
+            CustomerId = customer.Id,
+            Stars = stars
+        });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
     }
 
     private async Task<ClientDbContext> SeedMenuAsync()

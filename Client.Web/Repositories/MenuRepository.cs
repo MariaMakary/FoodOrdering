@@ -62,6 +62,19 @@ public class MenuRepository(ClientDbContext context) : IMenuRepository
             .Include(m => m.Extras.OrderBy(e => e.Name))
             .SingleOrDefaultAsync(m => m.Id == id && !m.IsDeleted, ct);
 
+    public Task<List<MenuItem>> GetFeaturedAsync(int count, CancellationToken ct = default) =>
+        context.MenuItems
+            .AsNoTracking()
+            .Include(m => m.Category)
+            .Where(m => m.IsAvailable && !m.IsDeleted)
+            .OrderBy(m => !context.Ratings.Any(r => r.MenuItemId == m.Id))
+            .ThenByDescending(m => context.Ratings.Where(r => r.MenuItemId == m.Id).Average(r => (double?)r.Stars))
+            .ThenByDescending(m => context.Ratings.Count(r => r.MenuItemId == m.Id))
+            .ThenByDescending(m => m.CreatedAt)
+            .ThenBy(m => m.Name)
+            .Take(count)
+            .ToListAsync(ct);
+
     private static string EscapeLikePattern(string value) =>
         value.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
 }
