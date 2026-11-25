@@ -1,9 +1,11 @@
+using System.Security.Claims;
 using Client.Web;
 using Client.Web.Data;
 using Client.Web.Models.Identity;
 using Client.Web.Models.ViewModels;
 using Client.Web.Services;
 using FoodOrdering.IntegrationTests.Infrastructure;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +18,7 @@ namespace FoodOrdering.IntegrationTests.Client;
 public class AccountServiceTests(PostgresFixture postgres)
 {
     private const string Password = "Burger123";
+    private const string NewPassword = "Shawarma456";
 
     [Fact]
     public async Task RegisterAsync_ShouldSaveTheUserWithTheCustomerRoleAndAHashedPassword()
@@ -121,6 +124,263 @@ public class AccountServiceTests(PostgresFixture postgres)
         SignInResult result = await LoginAsync(services, "sara@example.com", Password);
         result.IsLockedOut.ShouldBeTrue();
     }
+
+    [Fact]
+    public async Task GetProfileAsync_ShouldReturnTheCustomersDetails()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+
+        ProfileViewModel? profile = await GetProfileAsync(services, principal);
+
+        profile.ShouldNotBeNull();
+        profile.FirstName.ShouldBe("Sara");
+        profile.LastName.ShouldBe("Haddad");
+        profile.Email.ShouldBe("sara@example.com");
+        profile.Phone.ShouldBe("+961 70 123 456");
+        profile.DefaultAddress.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetProfileAsync_ShouldReturnNull_WhenTheUserNoLongerExists()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+        await using (ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString))
+        {
+            await context.Users.ExecuteDeleteAsync();
+        }
+
+        ProfileViewModel? profile = await GetProfileAsync(services, principal);
+
+        profile.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsync_ShouldSaveTheNewDetails()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+
+        IdentityResult result = await UpdateProfileAsync(services, principal, new ProfileViewModel
+        {
+            FirstName = " Rana ",
+            LastName = "Khoury",
+            Phone = "+961 71 999 888",
+            DefaultAddress = " Hamra Street 12, Beirut "
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        ProfileViewModel? reloaded = await GetProfileAsync(services, principal);
+        reloaded.ShouldNotBeNull();
+        reloaded.FirstName.ShouldBe("Rana");
+        reloaded.LastName.ShouldBe("Khoury");
+        reloaded.Phone.ShouldBe("+961 71 999 888");
+        reloaded.DefaultAddress.ShouldBe("Hamra Street 12, Beirut");
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsync_ShouldKeepTheEmail_WhenADifferentEmailIsSent()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+        ProfileViewModel profile = NewProfile();
+        profile.Email = "someone.else@example.com";
+
+        await UpdateProfileAsync(services, principal, profile);
+
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        ApplicationUser user = await context.Users.SingleAsync();
+        user.Email.ShouldBe("sara@example.com");
+        user.UserName.ShouldBe("sara@example.com");
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsync_ShouldClearTheDefaultAddress_WhenItIsBlank()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+        await UpdateProfileAsync(services, principal, NewProfile());
+        ProfileViewModel profile = NewProfile();
+        profile.DefaultAddress = "   ";
+
+        await UpdateProfileAsync(services, principal, profile);
+
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        (await context.Users.SingleAsync()).DefaultAddress.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task UpdateProfileAsync_ShouldFail_WhenTheUserNoLongerExists()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+        await using (ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString))
+        {
+            await context.Users.ExecuteDeleteAsync();
+        }
+
+        IdentityResult result = await UpdateProfileAsync(services, principal, NewProfile());
+
+        result.Succeeded.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.Code == AccountErrors.UserNotFound);
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_ShouldFail_WhenTheUserNoLongerExists()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+        await using (ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString))
+        {
+            await context.Users.ExecuteDeleteAsync();
+        }
+
+        IdentityResult result = await ChangePasswordAsync(services, principal, Password, "Pizza1234");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.Code == AccountErrors.UserNotFound);
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_ShouldLetTheCustomerLogInWithTheNewPassword()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+
+        IdentityResult result = await ChangePasswordAsync(services, principal, Password, NewPassword);
+
+        result.Succeeded.ShouldBeTrue();
+        (await LoginAsync(services, "sara@example.com", NewPassword)).Succeeded.ShouldBeTrue();
+        (await LoginAsync(services, "sara@example.com", Password)).Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_ShouldFail_WhenTheCurrentPasswordIsWrong()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+
+        IdentityResult result = await ChangePasswordAsync(services, principal, "Wrong1234", NewPassword);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.Code == "PasswordMismatch");
+        (await LoginAsync(services, "sara@example.com", Password)).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_ShouldFail_WhenTheNewPasswordIsTooWeak()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        await RegisterAsync(services, NewRegistration("sara@example.com"));
+        ClaimsPrincipal principal = await PrincipalForAsync(services, "sara@example.com");
+
+        IdentityResult result = await ChangePasswordAsync(services, principal, Password, "pizzas12");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.Code == "PasswordRequiresUpper");
+        (await LoginAsync(services, "sara@example.com", Password)).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_ShouldKeepTheCustomerSignedIn()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        await using ServiceProvider services = await NewServicesAsync(connectionString);
+        string authCookie;
+        await using (AsyncServiceScope registerScope = NewRequestScope(services, out HttpContext registerContext))
+        {
+            await registerScope.ServiceProvider.GetRequiredService<IAccountService>()
+                .RegisterAsync(NewRegistration("sara@example.com"));
+            authCookie = AuthCookieFrom(registerContext);
+        }
+
+        await using AsyncServiceScope scope = NewRequestScope(services, out HttpContext httpContext);
+        httpContext.Request.Headers.Cookie = authCookie;
+        AuthenticateResult signedIn = await httpContext.AuthenticateAsync(IdentityConstants.ApplicationScheme);
+        signedIn.Succeeded.ShouldBeTrue();
+
+        IdentityResult result = await scope.ServiceProvider.GetRequiredService<IAccountService>()
+            .ChangePasswordAsync(signedIn.Principal!, new ChangePasswordViewModel
+            {
+                CurrentPassword = Password,
+                NewPassword = NewPassword,
+                ConfirmPassword = NewPassword
+            });
+
+        result.Succeeded.ShouldBeTrue();
+        AuthCookieFrom(httpContext).ShouldNotBe(authCookie);
+    }
+
+    private static string AuthCookieFrom(HttpContext httpContext)
+    {
+        string setCookie = httpContext.Response.Headers.SetCookie.ToString();
+        int start = setCookie.IndexOf(ServiceExtensions.AuthCookieName + "=", StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0);
+        int end = setCookie.IndexOf(';', start);
+        return end < 0 ? setCookie[start..] : setCookie[start..end];
+    }
+
+    private static async Task<ClaimsPrincipal> PrincipalForAsync(ServiceProvider services, string email)
+    {
+        await using AsyncServiceScope scope = NewRequestScope(services, out _);
+        UserManager<ApplicationUser> users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        ApplicationUser user = (await users.FindByEmailAsync(email))!;
+        return await scope.ServiceProvider.GetRequiredService<SignInManager<ApplicationUser>>().CreateUserPrincipalAsync(user);
+    }
+
+    private static async Task<ProfileViewModel?> GetProfileAsync(ServiceProvider services, ClaimsPrincipal principal)
+    {
+        await using AsyncServiceScope scope = NewRequestScope(services, out _);
+        return await scope.ServiceProvider.GetRequiredService<IAccountService>().GetProfileAsync(principal);
+    }
+
+    private static async Task<IdentityResult> UpdateProfileAsync(
+        ServiceProvider services, ClaimsPrincipal principal, ProfileViewModel profile)
+    {
+        await using AsyncServiceScope scope = NewRequestScope(services, out _);
+        return await scope.ServiceProvider.GetRequiredService<IAccountService>().UpdateProfileAsync(principal, profile);
+    }
+
+    private static async Task<IdentityResult> ChangePasswordAsync(
+        ServiceProvider services, ClaimsPrincipal principal, string currentPassword, string newPassword)
+    {
+        await using AsyncServiceScope scope = NewRequestScope(services, out _);
+        return await scope.ServiceProvider.GetRequiredService<IAccountService>()
+            .ChangePasswordAsync(principal, new ChangePasswordViewModel
+            {
+                CurrentPassword = currentPassword,
+                NewPassword = newPassword,
+                ConfirmPassword = newPassword
+            });
+    }
+
+    private static ProfileViewModel NewProfile() => new()
+    {
+        FirstName = "Sara",
+        LastName = "Haddad",
+        Phone = "+961 70 123 456",
+        DefaultAddress = "Hamra Street 12, Beirut"
+    };
 
     private static async Task<ServiceProvider> NewServicesAsync(string connectionString)
     {
