@@ -193,7 +193,7 @@ Sent when the customer cancels. Allowed only while the order is `Placed` (DEC-00
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `orderId` | Guid | yes | |
-| `reason` | string? | no | What the customer typed, if anything |
+| `reason` | string? | no | The Client sends "Cancelled by customer" (UNI-69). Kept nullable so a reason typed by the customer can be added later. |
 | `cancelledAt` | DateTime (UTC) | yes | |
 
 ```json
