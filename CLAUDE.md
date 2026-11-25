@@ -31,10 +31,10 @@ Follow [README.md](README.md): `docker compose up -d`, create `appsettings.Devel
 | `Models/Identity/` | `ApplicationUser`, `ApplicationRole` |
 | `Models/Enums/` | Enums used by only this app. Enums in messages live in `Shared.Contracts`. |
 | `Messaging/Consumers/` | This app's RabbitMQ consumers |
-| `Hubs/` | SignalR hubs |
+| `Hubs/` | SignalR hubs and the notifiers that send their events (`IOrderNotifier`, `OrderHubNotifier`) |
 | `Options/` | Settings classes used by only this app (e.g. `StripeOptions`) |
 
-- Register every service and repository in `ServiceExtensions.cs` (`AddClientServices()` / `AddAdminServices()`), not in `Program.cs`. Use `AddScoped`, the same lifetime as the `DbContext`.
+- Register every service and repository in `ServiceExtensions.cs` (`AddClientServices()` / `AddAdminServices()`), not in `Program.cs`. Use `AddScoped`, the same lifetime as the `DbContext`. A SignalR notifier is `AddSingleton`, because it only wraps the singleton `IHubContext`.
 - `IExampleService` and `IExampleRepository` in `Admin.Web` only show the pattern. Delete them in the PR that adds Admin's first real service (Client's were deleted in UNI-63).
 
 ## Code rules
@@ -100,13 +100,28 @@ The full rules, the cancel race and the scenarios are DEC-001 in [docs/decisions
 
 ## Real-time (SignalR)
 
-Hubs live in `Hubs/`. Consumers and services send events through `IHubContext<THub>` after the save succeeded. Use exactly these names, because the JavaScript listens for them.
+Hubs live in `Hubs/`. Services send events after the save succeeded, through a small notifier interface in `Hubs/` (`IOrderNotifier`) whose class wraps `IHubContext<THub>`, so services don't depend on SignalR types. Use exactly these names, because the JavaScript listens for them.
 
 | App | Hub | URL | Who can connect | Event | Parameters | Sent to |
 |---|---|---|---|---|---|---|
 | Client | `OrderHub` | `/hubs/orders` | Customer | `OrderStatusUpdated` | `orderId`, `newStatus`, `estimatedTime` | `Clients.User(customerId)`, only the order's owner |
 | Admin | `AdminHub` | `/hubs/admin` | Any staff | `NewOrder` | `orderCard` (`OrderCardViewModel`) | `Clients.All` |
 | Admin | `AdminHub` | `/hubs/admin` | Any staff | `OrderUpdated` | `orderId`, `status`, `isPaid` | `Clients.All` |
+
+**Client `OrderHub` (UNI-71)**
+
+- `[Authorize(Roles = ClientRoles.Customer)]`, mapped in `Program.cs` with `app.MapHub<OrderHub>(OrderHub.Path)`. SignalR is registered by `AddClientSignalR()`, which `AddClientServices()` calls. The hub has no methods the browser can call; it only receives events.
+- A request without a login gets `401` (not a redirect to the login page), and a logged-in user without the `Customer` role gets `403`.
+- The SignalR user id is the default `ClaimTypes.NameIdentifier` claim, which Identity fills with the user's Guid, so `Clients.User(order.CustomerId.ToString())` reaches every open tab of that customer and nobody else.
+- `OrderStatusService.ApplyStatusChangeAsync` calls `IOrderNotifier.OrderStatusUpdatedAsync` once, only after `SaveChangesAsync` saved a change. An unknown order, a stale message or a repeated message pushes nothing.
+- If the push fails, the error is logged as a warning and the message is still handled. The database is the source of truth and the page reloads its data, so a lost push is never retried.
+- The event has 3 positional arguments. Enums are sent as text, like in the messages: `connection.on("OrderStatusUpdated", (orderId, newStatus, estimatedTime) => ...)`.
+
+| Argument | JSON type | Example | Notes |
+|---|---|---|---|
+| `orderId` | string (Guid) | `"7c9e6679-7425-40de-944b-e07fc1f90ae7"` | |
+| `newStatus` | string (`OrderStatus` name) | `"Accepted"` | Never a number |
+| `estimatedTime` | string (UTC ISO 8601) or `null` | `"2026-11-24T13:15:00Z"` | The order's saved ETA, kept from an earlier change when the message has none |
 
 ## Authorization
 
@@ -123,7 +138,7 @@ Both apps use ASP.NET Core Identity with cookies (no JWT).
 | Controller | Access |
 |---|---|
 | `Home`, `Menu`, `Account` (Register, Login) | Public |
-| `Cart`, `Checkout`, `Orders`, `Ratings`, `Payment`, `Account` (Profile, ChangePassword, Logout) | `[Authorize(Roles = "Customer")]` |
+| `Cart`, `Checkout`, `Orders`, `Ratings`, `Payment`, `Account` (Profile, ChangePassword, Logout), `OrderHub` (`/hubs/orders`) | `[Authorize(Roles = "Customer")]` |
 | `Payment.Webhook` | `[AllowAnonymous]`, checked with the Stripe signature |
 
 **Admin** has the roles `Admin`, `Staff` and `Manager`, and no public registration. A fallback policy requires login on every page unless it has `[AllowAnonymous]` (only `Account.Login`).
@@ -160,6 +175,7 @@ Fast tests with no database, no RabbitMQ and no Docker. Put each test in the fol
 | `Messaging/` | `Shared.Messaging` (options, topology) with a substituted `IChannel` |
 | `Persistence/` | `Shared.Persistence` code that needs no database (e.g. `OutboxMessage`) |
 | `Client/` | Client.Web app setup, e.g. `ErrorHandlingExtensions` with an in-memory `TestServer` |
+| `Client/Hubs/` | SignalR hubs and notifiers in Client.Web (hub access with an in-memory `TestServer`, notifier with a substituted `IHubContext`) |
 | `Client/Consumers/` | RabbitMQ consumers in Client.Web |
 | `Client/Services/` | Services in Client.Web |
 | `Admin/` | Admin.Web app setup, e.g. `ErrorHandlingExtensions` with an in-memory `TestServer` |
