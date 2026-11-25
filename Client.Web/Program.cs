@@ -29,11 +29,7 @@ if (app.Environment.IsDevelopment())
 
 await IdentitySeeder.SeedRolesAsync(app.Services);
 
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Home/Error");
-    app.UseHsts();
-}
+app.UseErrorPages();
 
 app.UseHttpsRedirection();
 app.UseRouting();
