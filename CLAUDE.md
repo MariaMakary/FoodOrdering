@@ -159,8 +159,10 @@ Fast tests with no database, no RabbitMQ and no Docker. Put each test in the fol
 | `Contracts/` | `Shared.Contracts` (messages, enums, JSON) |
 | `Messaging/` | `Shared.Messaging` (options, topology) with a substituted `IChannel` |
 | `Persistence/` | `Shared.Persistence` code that needs no database (e.g. `OutboxMessage`) |
+| `Client/` | Client.Web app setup, e.g. `ErrorHandlingExtensions` with an in-memory `TestServer` |
 | `Client/Consumers/` | RabbitMQ consumers in Client.Web |
 | `Client/Services/` | Services in Client.Web |
+| `Admin/` | Admin.Web app setup, e.g. `ErrorHandlingExtensions` with an in-memory `TestServer` |
 | `Admin/Consumers/` | RabbitMQ consumers in Admin.Web |
 | `Admin/Services/` | Services in Admin.Web |
 | `Helpers/` | Shared test helpers, e.g. `MessageExamples` (reads the JSON examples from `docs/messages.md`) |
