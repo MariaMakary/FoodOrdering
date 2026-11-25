@@ -10,8 +10,6 @@ namespace Client.Web.Controllers;
 
 public class AccountController(IAccountService accounts) : Controller
 {
-    public const string SuccessKey = "Success";
-
     [HttpGet]
     [AllowAnonymous]
     public IActionResult Register()
@@ -116,7 +114,7 @@ public class AccountController(IAccountService accounts) : Controller
             IdentityResult result = await accounts.UpdateProfileAsync(User, model);
             if (result.Succeeded)
             {
-                TempData[SuccessKey] = "Your profile was saved.";
+                TempData[TempDataKeys.Success] = "Your profile was saved.";
                 return RedirectToAction(nameof(Profile));
             }
 
@@ -150,7 +148,7 @@ public class AccountController(IAccountService accounts) : Controller
         IdentityResult result = await accounts.ChangePasswordAsync(User, model);
         if (result.Succeeded)
         {
-            TempData[SuccessKey] = "Your password was changed.";
+            TempData[TempDataKeys.Success] = "Your password was changed.";
             return RedirectToAction(nameof(ChangePassword));
         }
 

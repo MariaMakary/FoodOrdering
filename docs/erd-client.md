@@ -65,9 +65,9 @@ This is the test for this ticket: every field Client sends has a column to come 
 | `items[].extras[].name` | `OrderItemExtra.Name` |
 | `items[].extras[].price` | `OrderItemExtra.Price` |
 | `total` | `Order.Total` |
-| `placedAt` | `Order.CreatedAt` (the Client creates the row when the order is placed) |
+| `placedAt` | `Order.LastStatusChangedAt` and the first `OrderStatusHistory.ChangedAt` |
 
-Also: `Order.Status = Placed`, `Order.LastStatusChangedAt = CreatedAt`, `Order.PaymentStatus` is `Unpaid` (Online) or `CashOnDelivery` (Cash), a first `OrderStatusHistory` row is added, the cart is emptied, and the message goes into `OutboxMessage` in the same save.
+Also: one `now = DateTime.UtcNow` is taken for `placedAt`, `Order.LastStatusChangedAt` and the first `OrderStatusHistory.ChangedAt`, because `Order.CreatedAt` is only set by `AuditInterceptor` during the save (DEC-003). `Order.Status = Placed`, `Order.PaymentStatus` is `Unpaid` (Online) or `CashOnDelivery` (Cash), a first `OrderStatusHistory` row is added, the cart is emptied, and the message goes into `OutboxMessage` in the same save.
 
 ### `PaymentCompleted` (sent when Stripe confirms)
 
