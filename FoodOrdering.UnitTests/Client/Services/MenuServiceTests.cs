@@ -143,6 +143,71 @@ public class MenuServiceTests
         model.ShouldBeNull();
     }
 
+    [Fact]
+    public async Task GetFeaturedAsync_ShouldAskTheRepositoryForSixDishes_WhenNoCountIsGiven()
+    {
+        _menu.GetFeaturedAsync(default, Arg.Any<CancellationToken>()).ReturnsForAnyArgs([]);
+
+        await _service.GetFeaturedAsync();
+
+        await _menu.Received(1).GetFeaturedAsync(6, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetFeaturedAsync_ShouldMapTheDishesToCardsInTheRepositoryOrder()
+    {
+        MenuItem salad = NewDish(_salads, "Greek Salad", 7.00m, isVegetarian: true, isAvailable: true);
+        MenuItem burger = NewDish(_burgers, "Chicken Burger", 9.50m, isVegetarian: false, isAvailable: true);
+        burger.PhotoUrl = "/images/chicken-burger.jpg";
+        _menu.GetFeaturedAsync(3, Arg.Any<CancellationToken>()).Returns([salad, burger]);
+
+        List<DishCardViewModel> cards = await _service.GetFeaturedAsync(3);
+
+        cards.Select(c => (c.Id, c.Name, c.CategoryName)).ShouldBe(
+            [(salad.Id, "Greek Salad", "Salads"), (burger.Id, "Chicken Burger", "Burgers")]);
+        cards[1].Price.ShouldBe(9.50m);
+        cards[1].PhotoUrl.ShouldBe("/images/chicken-burger.jpg");
+        cards[0].IsVegetarian.ShouldBeTrue();
+        cards.ShouldAllBe(c => c.IsAvailable);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task GetFeaturedAsync_ShouldReturnNoDishesWithoutAQuery_WhenTheCountIsNotPositive(int count)
+    {
+        List<DishCardViewModel> cards = await _service.GetFeaturedAsync(count);
+
+        cards.ShouldBeEmpty();
+        await _menu.DidNotReceiveWithAnyArgs().GetFeaturedAsync(default, default);
+    }
+
+    [Fact]
+    public async Task GetHomeAsync_ShouldBuildTheCategoriesAndSixFeaturedDishesWithNoRecommendations()
+    {
+        MenuItem burger = NewDish(_burgers, "Chicken Burger", 9.50m, isVegetarian: false, isAvailable: true);
+        _menu.GetFeaturedAsync(6, Arg.Any<CancellationToken>()).Returns([burger]);
+
+        HomeViewModel model = await _service.GetHomeAsync();
+
+        model.Categories.Select(c => (c.Id, c.Name)).ShouldBe([(_burgers.Id, "Burgers"), (_salads.Id, "Salads")]);
+        model.FeaturedDishes.ShouldHaveSingleItem().Id.ShouldBe(burger.Id);
+        model.Recommendations.ShouldBeEmpty();
+        await _menu.Received(1).GetFeaturedAsync(HomeViewModel.FeaturedDishesCount, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetHomeAsync_ShouldPassTheCancellationTokenToTheRepository()
+    {
+        using var cts = new CancellationTokenSource();
+        _menu.GetFeaturedAsync(default, default).ReturnsForAnyArgs([]);
+
+        await _service.GetHomeAsync(cts.Token);
+
+        await _menu.Received(1).GetCategoriesAsync(cts.Token);
+        await _menu.Received(1).GetFeaturedAsync(HomeViewModel.FeaturedDishesCount, cts.Token);
+    }
+
     private static MenuItem NewDish(Category category, string name, decimal price, bool isVegetarian, bool isAvailable) => new()
     {
         Id = Guid.NewGuid(),
