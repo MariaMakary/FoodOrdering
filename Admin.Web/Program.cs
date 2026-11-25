@@ -1,9 +1,11 @@
 using Admin.Web;
 using Admin.Web.Data;
+using Admin.Web.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
 using Shared.Persistence;
 using Shared.Persistence.Outbox;
+using Shared.Persistence.ProcessedMessages;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +18,7 @@ var adminDbConnection = builder.Configuration.GetConnectionString("AdminDb")
 
 builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(adminDbConnection));
 builder.Services.AddOutbox<AdminDbContext>();
+builder.Services.AddProcessedMessages<AdminDbContext, ProcessedMessage>();
 
 builder.Services.AddAdminServices();
 

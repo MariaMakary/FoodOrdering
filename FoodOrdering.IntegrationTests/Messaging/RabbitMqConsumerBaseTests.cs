@@ -2,6 +2,7 @@ using FoodOrdering.IntegrationTests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using NSubstitute;
 using RabbitMQ.Client;
 using Shared.Contracts.Messages;
 using Shared.Contracts.Messaging;
@@ -67,6 +68,7 @@ public class RabbitMqConsumerBaseTests(RabbitMqFixture rabbitMq)
         IHost host = rabbitMq.CreateHost(services =>
         {
             services.AddSingleton(handled);
+            services.AddSingleton(Substitute.For<IProcessedMessageStore>());
             services.AddHostedService<TConsumer>();
         });
         await host.StartAsync();

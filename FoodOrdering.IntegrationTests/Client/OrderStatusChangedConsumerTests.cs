@@ -6,12 +6,16 @@ using Client.Web.Models.Identity;
 using Client.Web.Services;
 using FoodOrdering.IntegrationTests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using NSubstitute;
+using RabbitMQ.Client;
 using Shared.Contracts.Enums;
 using Shared.Contracts.Messages;
 using Shared.Messaging;
+using Shared.Persistence.ProcessedMessages;
 using Shouldly;
 
 namespace FoodOrdering.IntegrationTests.Client;
@@ -140,6 +144,152 @@ public class OrderStatusChangedConsumerTests(PostgresFixture postgres)
         order.StatusHistory.Select(h => h.Status).ShouldBe([OrderStatus.Accepted, OrderStatus.Preparing], ignoreOrder: true);
     }
 
+    [Fact]
+    public async Task OnReceivedAsync_ShouldApplyTheChangeOnceAndAckBothCopies_WhenTheSameMessageArrivesTwice()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        Guid orderId = await SeedOrderAsync(connectionString, OrderStatus.Placed, PlacedAt);
+        OrderStatusChanged message = Accepted(orderId, PlacedAt.AddMinutes(2));
+        using IHost host = BuildHost(connectionString);
+        IChannel channel = Substitute.For<IChannel>();
+
+        await ConsumerOf(host).OnReceivedAsync(channel, ConsumerDeliveries.Create(message, 1), CancellationToken.None);
+        await ConsumerOf(host).OnReceivedAsync(channel, ConsumerDeliveries.Create(message, 2), CancellationToken.None);
+
+        Order order = await LoadOrderAsync(connectionString, orderId);
+        order.Status.ShouldBe(OrderStatus.Accepted);
+        order.StatusHistory.ShouldHaveSingleItem();
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        (await context.ProcessedMessages.CountAsync()).ShouldBe(1);
+        await channel.Received(1).BasicAckAsync(1, false, Arg.Any<CancellationToken>());
+        await channel.Received(1).BasicAckAsync(2, false, Arg.Any<CancellationToken>());
+        await channel.DidNotReceiveWithAnyArgs().BasicNackAsync(default, default, default, default);
+    }
+
+    [Fact]
+    public async Task OnReceivedAsync_ShouldSaveAProcessedMessageRow_WhenTheChangeIsApplied()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        Guid orderId = await SeedOrderAsync(connectionString, OrderStatus.Placed, PlacedAt);
+        OrderStatusChanged message = Accepted(orderId, PlacedAt.AddMinutes(2));
+        using IHost host = BuildHost(connectionString);
+        DateTime before = DateTime.UtcNow;
+
+        await ConsumerOf(host).OnReceivedAsync(Substitute.For<IChannel>(), ConsumerDeliveries.Create(message, 1), CancellationToken.None);
+
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        ProcessedMessage row = await context.ProcessedMessages.SingleAsync();
+        row.MessageId.ShouldBe(message.MessageId);
+        row.Type.ShouldBe(nameof(OrderStatusChanged));
+        row.ProcessedAt.ShouldBeGreaterThanOrEqualTo(before.AddSeconds(-1));
+    }
+
+    [Fact]
+    public async Task OnReceivedAsync_ShouldSaveNoProcessedMessageRowAndNack_WhenSavingTheChangeFails()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        Guid orderId = await SeedOrderAsync(connectionString, OrderStatus.Placed, PlacedAt);
+        OrderStatusChanged message = new()
+        {
+            OrderId = orderId,
+            NewStatus = OrderStatus.Rejected,
+            Reason = new string('x', 501),
+            ChangedAt = PlacedAt.AddMinutes(2)
+        };
+        using IHost host = BuildHost(connectionString);
+        IChannel channel = Substitute.For<IChannel>();
+
+        await ConsumerOf(host).OnReceivedAsync(channel, ConsumerDeliveries.Create(message, 1), CancellationToken.None);
+
+        Order order = await LoadOrderAsync(connectionString, orderId);
+        order.Status.ShouldBe(OrderStatus.Placed);
+        order.StatusHistory.ShouldBeEmpty();
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        (await context.ProcessedMessages.CountAsync()).ShouldBe(0);
+        await channel.Received(1).BasicNackAsync(1, false, false, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnReceivedAsync_ShouldAckAndSaveNoProcessedMessageRow_WhenTheOrderDoesNotExist()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        OrderStatusChanged message = Accepted(Guid.NewGuid(), PlacedAt);
+        using IHost host = BuildHost(connectionString);
+        IChannel channel = Substitute.For<IChannel>();
+
+        await ConsumerOf(host).OnReceivedAsync(channel, ConsumerDeliveries.Create(message, 1), CancellationToken.None);
+
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        (await context.ProcessedMessages.CountAsync()).ShouldBe(0);
+        await channel.Received(1).BasicAckAsync(1, false, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task OnReceivedAsync_ShouldAckAsADuplicate_WhenAnotherCopySavesTheSameMessageIdAtTheSameTime()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        Guid orderId = await SeedOrderAsync(connectionString, OrderStatus.Placed, PlacedAt);
+        OrderStatusChanged message = Accepted(orderId, PlacedAt.AddMinutes(2));
+        using IHost host = BuildHost(connectionString);
+        IChannel channel = Substitute.For<IChannel>();
+
+        await using ClientDbContext firstCopy = postgres.NewDbContext<ClientDbContext>(connectionString);
+        await using IDbContextTransaction transaction = await firstCopy.Database.BeginTransactionAsync();
+        firstCopy.ProcessedMessages.Add(new ProcessedMessage
+        {
+            MessageId = message.MessageId,
+            Type = nameof(OrderStatusChanged),
+            ProcessedAt = DateTime.UtcNow
+        });
+        await firstCopy.SaveChangesAsync();
+
+        Task secondCopy = ConsumerOf(host).OnReceivedAsync(channel, ConsumerDeliveries.Create(message, 2), CancellationToken.None);
+        await WaitUntilASessionWaitsForALockAsync(connectionString);
+        await transaction.CommitAsync();
+        await secondCopy;
+
+        Order order = await LoadOrderAsync(connectionString, orderId);
+        order.Status.ShouldBe(OrderStatus.Placed);
+        order.StatusHistory.ShouldBeEmpty();
+        await channel.Received(1).BasicAckAsync(2, false, Arg.Any<CancellationToken>());
+        await channel.DidNotReceiveWithAnyArgs().BasicNackAsync(default, default, default, default);
+    }
+
+    [Fact]
+    public async Task OnReceivedAsync_ShouldApplyTheChangeOnce_WhenTwoCopiesAreHandledAtTheSameTime()
+    {
+        string connectionString = await postgres.CreateMigratedDatabaseAsync<ClientDbContext>();
+        Guid orderId = await SeedOrderAsync(connectionString, OrderStatus.Placed, PlacedAt);
+        OrderStatusChanged message = Accepted(orderId, PlacedAt.AddMinutes(2));
+        using IHost host = BuildHost(connectionString);
+
+        await using AsyncServiceScope firstCopy = host.Services.CreateAsyncScope();
+        ClientDbContext firstContext = firstCopy.ServiceProvider.GetRequiredService<ClientDbContext>();
+        await using IDbContextTransaction transaction = await firstContext.Database.BeginTransactionAsync();
+        firstCopy.ServiceProvider.GetRequiredService<IProcessedMessageStore>().MarkProcessed(message.MessageId, nameof(OrderStatusChanged));
+        await ConsumerOf(host).HandleAsync(message, firstCopy.ServiceProvider, CancellationToken.None);
+
+        Task secondCopy = ConsumerOf(host).OnReceivedAsync(Substitute.For<IChannel>(), ConsumerDeliveries.Create(message, 2), CancellationToken.None);
+        await WaitUntilASessionWaitsForALockAsync(connectionString);
+        await transaction.CommitAsync();
+        await secondCopy;
+
+        Order order = await LoadOrderAsync(connectionString, orderId);
+        order.Status.ShouldBe(OrderStatus.Accepted);
+        order.StatusHistory.ShouldHaveSingleItem();
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        (await context.ProcessedMessages.SingleAsync()).MessageId.ShouldBe(message.MessageId);
+    }
+
+    private static OrderStatusChangedConsumer ConsumerOf(IHost host) =>
+        host.Services.GetServices<IHostedService>().OfType<OrderStatusChangedConsumer>().Single();
+
+    private async Task WaitUntilASessionWaitsForALockAsync(string connectionString)
+    {
+        await using ClientDbContext monitor = postgres.NewDbContext<ClientDbContext>(connectionString);
+        await ConsumerDeliveries.WaitUntilASessionWaitsForALockAsync(monitor);
+    }
+
     private static OrderStatusChanged Accepted(Guid orderId, DateTime changedAt) => new()
     {
         CorrelationId = orderId,
@@ -170,6 +320,7 @@ public class OrderStatusChangedConsumerTests(PostgresFixture postgres)
         });
         builder.Services.AddRabbitMq(builder.Configuration);
         builder.Services.AddDbContext<ClientDbContext>(options => options.UseNpgsql(connectionString));
+        builder.Services.AddProcessedMessages<ClientDbContext, ProcessedMessage>();
         builder.Services.AddClientServices();
         return builder.Build();
     }

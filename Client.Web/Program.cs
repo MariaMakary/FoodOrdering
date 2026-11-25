@@ -1,9 +1,11 @@
 using Client.Web;
 using Client.Web.Data;
+using Client.Web.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Shared.Messaging;
 using Shared.Persistence;
 using Shared.Persistence.Outbox;
+using Shared.Persistence.ProcessedMessages;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +18,7 @@ var clientDbConnection = builder.Configuration.GetConnectionString("ClientDb")
 
 builder.Services.AddDbContext<ClientDbContext>(options => options.UseNpgsql(clientDbConnection));
 builder.Services.AddOutbox<ClientDbContext>();
+builder.Services.AddProcessedMessages<ClientDbContext, ProcessedMessage>();
 
 builder.Services.AddClientIdentity();
 builder.Services.AddClientServices();
