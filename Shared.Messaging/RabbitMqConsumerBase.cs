@@ -44,21 +44,26 @@ public abstract class RabbitMqConsumerBase<TMessage>(
         }
     }
 
-    private async Task OnReceivedAsync(IChannel channel, BasicDeliverEventArgs delivery, CancellationToken stoppingToken)
+    internal async Task OnReceivedAsync(IChannel channel, BasicDeliverEventArgs delivery, CancellationToken stoppingToken)
     {
         string? messageId = delivery.BasicProperties.MessageId;
         try
         {
             TMessage message = JsonSerializer.Deserialize<TMessage>(delivery.Body.Span, JsonOptions.Default)
                 ?? throw new JsonException("The message body is empty.");
+            messageId = message.MessageId.ToString();
 
+            bool handled;
             await using (AsyncServiceScope scope = scopeFactory.CreateAsyncScope())
             {
-                await HandleAsync(message, scope.ServiceProvider, stoppingToken);
+                handled = await HandleOnceAsync(message, scope.ServiceProvider, stoppingToken);
             }
 
             await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, CancellationToken.None);
-            logger.LogInformation("Handled {MessageType} {MessageId} from {Queue}", typeof(TMessage).Name, messageId, QueueName);
+            if (handled)
+            {
+                logger.LogInformation("Handled {MessageType} {MessageId} from {Queue}", typeof(TMessage).Name, messageId, QueueName);
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -69,6 +74,31 @@ public abstract class RabbitMqConsumerBase<TMessage>(
             logger.LogError(exception, "Failed to handle {MessageType} {MessageId} from {Queue}", typeof(TMessage).Name, messageId, QueueName);
             await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: false, CancellationToken.None);
         }
+    }
+
+    private async Task<bool> HandleOnceAsync(TMessage message, IServiceProvider services, CancellationToken ct)
+    {
+        IProcessedMessageStore processedMessages = services.GetRequiredService<IProcessedMessageStore>();
+        if (await processedMessages.IsProcessedAsync(message.MessageId, ct))
+        {
+            logger.LogInformation("Duplicate skipped: {MessageType} {MessageId} from {Queue} was already processed",
+                typeof(TMessage).Name, message.MessageId, QueueName);
+            return false;
+        }
+
+        processedMessages.MarkProcessed(message.MessageId, typeof(TMessage).Name);
+        try
+        {
+            await HandleAsync(message, services, ct);
+        }
+        catch (Exception exception) when (processedMessages.IsDuplicate(exception))
+        {
+            logger.LogInformation("Duplicate skipped: {MessageType} {MessageId} from {Queue} was processed by another copy at the same time",
+                typeof(TMessage).Name, message.MessageId, QueueName);
+            return false;
+        }
+
+        return true;
     }
 
     private static string FindQueue() =>

@@ -7,8 +7,8 @@ Shared code is split in three:
 | Project | Holds | Depends on |
 |---|---|---|
 | `Shared.Contracts` | Plain classes only: messages, enums, JSON options, routing keys and queue names | nothing |
-| `Shared.Messaging` | RabbitMQ code: connection, topology, `AddRabbitMq` | `Shared.Contracts`, RabbitMQ.Client |
-| `Shared.Persistence` | EF Core code both apps use: `AuditableEntity`, `IAuditable`, `AuditInterceptor`, `MigrateDatabaseAsync`, and the outbox (`Outbox/`) | EF Core, `Shared.Messaging` |
+| `Shared.Messaging` | RabbitMQ code: connection, topology, `AddRabbitMq`, `RabbitMqConsumerBase`, `IProcessedMessageStore` | `Shared.Contracts`, RabbitMQ.Client |
+| `Shared.Persistence` | EF Core code both apps use: `AuditableEntity`, `IAuditable`, `AuditInterceptor`, `MigrateDatabaseAsync`, the outbox (`Outbox/`) and the processed-message store (`ProcessedMessages/`) | EF Core, Npgsql, `Shared.Messaging` |
 
 Tests are in `FoodOrdering.UnitTests` and `FoodOrdering.IntegrationTests`.
 
@@ -78,7 +78,7 @@ The 6 messages, their fields and JSON examples are in [docs/messages.md](docs/me
 - **Publish only through the outbox** (DEC-004): inject `IOutbox`, call `outbox.Add(message)`, then the normal `SaveChangesAsync`, so the data change and the message are saved together or not at all. Never call `IMessagePublisher` from a service, controller or consumer; only `OutboxDispatcher` does. Each app registers it with `builder.Services.AddOutbox<TContext>()` and maps the table with `modelBuilder.AddOutbox()`.
 - A message type can only go in the outbox if it has a queue in `RabbitMqTopology.Bindings`.
 - **Consumers use manual acks** (UNI-16): ack only after the database save succeeded. A failing message is retried 5 times about 200 ms apart, then nacked with `requeue: false` so it goes to its `.error` queue (UNI-17). Never catch an exception just to log it and ack.
-- **Every consumer checks `ProcessedMessage` first** (UNI-18) and saves the `MessageId` in the same transaction as its change, so a duplicate message does nothing.
+- **Every consumer is idempotent** (UNI-18). `RabbitMqConsumerBase` acks without calling `HandleAsync` when the `MessageId` is already in `ProcessedMessages`; otherwise it adds the row to the scoped `DbContext` so the handler's one `SaveChangesAsync` saves it with the change. A `23505` on the `ProcessedMessages` primary key counts as a duplicate; any other error does not. Each app registers it with `builder.Services.AddProcessedMessages<TContext, ProcessedMessage>()`. A handler also checks its business key (e.g. `OrderId` already exists). Details: "Idempotent consumers" in [docs/messages.md](docs/messages.md).
 - A message is a full snapshot. The receiver never needs to ask the sender for more data.
 
 ## Order statuses

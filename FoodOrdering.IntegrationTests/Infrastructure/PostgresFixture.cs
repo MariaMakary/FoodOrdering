@@ -9,6 +9,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16")
         .WithUsername("postgres")
         .WithPassword("postgres")
+        .WithCommand("-c", "max_connections=500")
         .Build();
 
     public async Task<TContext> CreateDbContextAsync<TContext>() where TContext : DbContext

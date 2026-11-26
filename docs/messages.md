@@ -80,6 +80,49 @@ From `Shared.Contracts.Enums` (UNI-56): `OrderStatus`, `PaymentStatus`, `Deliver
 
 One new enum is needed for UNI-10: **`MenuItemAction`**, with the values `Created`, `Updated` and `Deleted`.
 
+## Idempotent consumers (UNI-18)
+
+RabbitMQ delivers a message **at least once**, so the same message can arrive twice: the app crashes after saving but before the ack, or the outbox sends a row again (DEC-004). Handling a message a second time must change nothing.
+
+### What happens to every message
+
+`RabbitMqConsumerBase` does this for every message, inside the DI scope it creates for that message:
+
+1. Reads `messageId` from the body. It is the same value as `BasicProperties.MessageId`; the body is used because the outbox row and the `ProcessedMessages` row are keyed on it. A body without `messageId` gets a new random one when it is read, so it can never be recognised as a duplicate: always send it.
+2. **If `ProcessedMessages` already has this `MessageId`:** logs `Duplicate skipped` (Information), acks and stops. `HandleAsync` is not called.
+3. Otherwise it adds a `ProcessedMessage` row (`MessageId`, `Type`, `ProcessedAt`) to the scoped `DbContext` **without saving**, then calls `HandleAsync`.
+4. The handler's normal `SaveChangesAsync` saves its change **and** the `ProcessedMessage` row in one transaction: both or neither. If the save fails, no row exists and the message can be tried again.
+5. If the handler returns without saving (unknown order, an older status), the row is not saved either, so a later copy or a retry is handled normally.
+6. Acks.
+
+A handler must therefore save once, with the scoped `DbContext`, and never ack or catch the save error itself.
+
+**Code:** the interface `IProcessedMessageStore` is in `Shared.Messaging` (no EF Core there). `ProcessedMessageStore<TContext, TProcessedMessage>` in `Shared.Persistence/ProcessedMessages/` implements it with EF Core, and each app registers it next to the outbox with `builder.Services.AddProcessedMessages<AdminDbContext, ProcessedMessage>()`. Each app keeps its own `ProcessedMessage` entity, which implements `IProcessedMessage`, so the tables and migrations did not change. `MessageId` alone is the key because each message type has exactly one consumer per app.
+
+### Two copies at the same moment
+
+Two copies can both pass step 2 before either has saved. Then PostgreSQL decides: the second save waits for the first, and when the first commits, the second fails with a unique violation (`23505`).
+
+- **Clash on `PK_ProcessedMessages`:** `IsDuplicate` recognises it, so the consumer logs `Duplicate skipped` and acks. Only a `DbUpdateException` whose inner `PostgresException` has SqlState `23505` **on the `ProcessedMessages` primary key** counts. Any other unique violation, for example `Ratings (OrderId, MenuItemId)`, is a real error.
+- **Clash on a business row first:** EF Core inserts `Orders` before `ProcessedMessages`, so a second `OrderPlaced` fails on `PK_Orders`, and a second `OrderStatusChanged` fails the `xmin` check (`DbUpdateConcurrencyException`). These are not treated as duplicates: the message fails and is retried (UNI-16), and the retry's step 2 finds the `MessageId` and acks it. Until the retry is built it is nacked like any other failure.
+
+Either way the data is saved exactly once. The integration tests hold the first copy's transaction open to make both cases happen on purpose.
+
+### Business keys
+
+`ProcessedMessages` catches the same message twice. A business key also catches the same fact sent in two different messages (a new `MessageId`), because the `ProcessedMessages` table is not the business data:
+
+| Message | Business key |
+|---|---|
+| `OrderPlaced` | Admin does nothing if the `OrderId` already exists |
+| `OrderStatusChanged` | Client ignores a change that is not newer than `Order.LastStatusChangedAt` (DEC-001) |
+| `DishRated` | `ratingId` is the primary key of Admin's `Ratings` (UNI-41) |
+| `MenuItemUpdated` | Client ignores a message that is not newer than `MenuItem.SourceUpdatedAt` |
+
+Every new consumer adds its own business key.
+
+**Check it:** publish an `OrderPlaced` from the Management UI, then publish the exact same JSON again. Admin still has one order and logs `Duplicate skipped`.
+
 ---
 
 ## 1. `OrderPlaced` (Client → Admin)
@@ -217,7 +260,7 @@ Sent when the customer rates a dish from one of their delivered orders.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `ratingId` | Guid | yes | Id in the Client database |
+| `ratingId` | Guid | yes | Id in the Client database. Admin saves the rating with the same Id as the primary key of `Ratings`, so a second copy can't create a second rating (see [Idempotent consumers](#idempotent-consumers-uni-18)). |
 | `orderId` | Guid | yes | The order the dish came from |
 | `menuItemId` | Guid | yes | The rated dish |
 | `customerName` | string | yes | Shown next to the review in Admin |
