@@ -1,4 +1,5 @@
 using Client.Web.Data;
+using Client.Web.Hubs;
 using Client.Web.Models.Entities;
 using Client.Web.Models.ViewModels;
 using Client.Web.Repositories;
@@ -7,6 +8,7 @@ using FoodOrdering.IntegrationTests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Shared.Contracts.Enums;
 using Shared.Contracts.Messages;
 using Shared.Persistence.Outbox;
@@ -243,6 +245,7 @@ public class OrderServiceTests(PostgresFixture postgres)
             await using ClientDbContext consumerContext = postgres.NewDbContext<ClientDbContext>(connectionString);
             var statusService = new OrderStatusService(
                 new OrderStatusRepository(consumerContext),
+                Substitute.For<IOrderNotifier>(),
                 NullLogger<OrderStatusService>.Instance);
             await statusService.ApplyStatusChangeAsync(new OrderStatusChanged
             {
