@@ -84,7 +84,7 @@ Also: `Order.PaymentStatus = Paid`.
 | `reason` | `OrderStatusHistory.Note` |
 | `cancelledAt` | `OrderStatusHistory.ChangedAt` |
 
-Also: `Order.Status = Cancelled`, `ChangedByUserId = null`. If the cancel is refused (DEC-001 race rule), only `MessageLog` gets a row.
+Also: `Order.Status = Cancelled`, `ChangedByUserId = null`. If the cancel is refused (DEC-001 race rule), the order and its history don't change: only an `OutboxMessage` row gets an `OrderStatusChanged` with the current status (UNI-41).
 
 ### `DishRated` (received)
 

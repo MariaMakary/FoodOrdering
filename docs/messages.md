@@ -116,7 +116,9 @@ Either way the data is saved exactly once. The integration tests hold the first 
 |---|---|
 | `OrderPlaced` | Admin does nothing if the `OrderId` already exists |
 | `OrderStatusChanged` | Client ignores a change that is not newer than `Order.LastStatusChangedAt` (DEC-001) |
-| `DishRated` | `ratingId` is the primary key of Admin's `Ratings` (UNI-41) |
+| `PaymentCompleted` | Admin does nothing if the order already has a `Payment` row (UNI-41) |
+| `OrderCancelled` | Admin does nothing if the order is already `Cancelled` (UNI-41) |
+| `DishRated` | `ratingId` is the primary key of Admin's `Ratings`, and Admin does nothing if that `ratingId` or that (`orderId`, `menuItemId`) is already saved (UNI-41) |
 | `MenuItemUpdated` | Client ignores a message that is not newer than `MenuItem.SourceUpdatedAt` |
 
 Every new consumer adds its own business key.
@@ -225,7 +227,9 @@ Sent when an online payment succeeds. Not sent for cash orders: Admin marks cash
 
 **Can Admin do its job?** ✅ It sets the order's payment status to `Paid`, so staff know they can accept it. If `amount` is different from the order total, Admin logs a warning.
 
-**Order of arrival:** `PaymentCompleted` can arrive before `OrderPlaced`. Admin then keeps it and applies it once the order exists, or Client sends `OrderPlaced` only after the payment step. We need to pick one when coding (UNI-10).
+**Order of arrival:** `PaymentCompleted` can arrive before `OrderPlaced`. Admin's consumer then throws `OrderNotReceivedException`, so the message is not acked and is retried (DEC-002), and applied once the order exists. The Client's outbox sends `OrderPlaced` first, so this is rare.
+
+**How Admin applies it (UNI-41):** `PaymentCompletedConsumer` → `PaymentService` → `PaymentRepository`. It adds a `Payment` row with `paymentId` as its Id and sets `Order.PaymentStatus = Paid` in one save, also for an order that is already `Cancelled` or `Rejected` (it then needs a refund, DEC-001). An order that already has a payment is left as it is.
 
 ---
 
@@ -251,6 +255,15 @@ Sent when the customer cancels. Allowed only while the order is `Placed` (DEC-00
 ```
 
 **Can Admin do its job?** ✅ If the order is still `Placed`, Admin sets `Cancelled`. If it is already `Accepted` or later, Admin follows the race rule in DEC-001: ignore, log, and send `OrderStatusChanged` with the current status.
+
+**How Admin applies it (UNI-41):** `OrderCancelledConsumer` → `OrderCancellationService` → `OrderRepository`.
+
+- Order not there yet: throws `OrderNotReceivedException`, so the message is retried (DEC-002).
+- `Placed`: sets `Cancelled` and adds an `OrderStatusHistory` row (`ChangedAt = cancelledAt`, `Note = reason`, `ChangedByUserId = null`).
+- `Cancelled`: nothing changes.
+- Any other status (`Accepted` or later, or `Rejected`): the cancel is ignored and logged as a warning, and an `OrderStatusChanged` with the current status is added to the outbox in the same save. It carries the order's `EstimatedDeliveryTime`, the `ChangedAt` of the latest history row for that status, and for `Rejected` the rejection reason. The Client applies it over its own `Cancelled`.
+- When the order is `Placed` and staff accept or reject it between the read and the save, the save fails on the `xmin` check (`DbUpdateConcurrencyException`). The message fails and is retried, and the retry sees the new status and refuses the cancel.
+- A refused cancel doesn't change the order, so `xmin` doesn't apply there. If staff move the order on at that moment, the outbox row may carry the status from just before. The Client still ends up right, because it also gets the staff's own newer `OrderStatusChanged`.
 
 ---
 
@@ -284,6 +297,8 @@ Sent when the customer rates a dish from one of their delivered orders.
 ```
 
 **Can Admin do its job?** ✅ It can show the review under the dish and work out the dish's average rating. `menuItemId` matches Admin's own menu, so no dish name is needed.
+
+**How Admin applies it (UNI-41):** `DishRatedConsumer` → `RatingService` → `RatingRepository`. It saves a `Rating` row with `ratingId` as its Id and `ratedAt` in `Rating.RatedAt`. A rating for an order Admin doesn't have yet throws `OrderNotReceivedException` and is retried (DEC-002). A rating whose `ratingId` is already saved, or a second rating for the same dish of the same order, is logged and ignored. The average is worked out from the `Ratings` rows when it is shown; it is not stored.
 
 ---
 
@@ -423,5 +438,5 @@ Both of you should confirm these before UNI-10:
 2. **`orderNumber` is created by Client**, format `FO-<number>`.
 3. **Enum values are sent as written in C#** (`"OutForDelivery"`), not in camelCase.
 4. **`estimatedDeliveryTime` is a UTC date/time**, not "30 minutes".
-5. **`PaymentCompleted` arriving before `OrderPlaced`:** Admin holds it until the order arrives, or Client only sends `OrderPlaced` after payment. Pick one.
+5. **`PaymentCompleted` arriving before `OrderPlaced`:** Admin retries it until the order arrives (DEC-002, UNI-41).
 6. **New enum `MenuItemAction`** (Created, Updated, Deleted) is added to `Shared.Contracts.Enums` in UNI-10.

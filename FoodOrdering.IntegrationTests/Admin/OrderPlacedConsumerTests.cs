@@ -1,11 +1,9 @@
-using Admin.Web;
 using Admin.Web.Data;
 using Admin.Web.Messaging.Consumers;
 using Admin.Web.Models.Entities;
 using FoodOrdering.IntegrationTests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NSubstitute;
@@ -13,7 +11,6 @@ using RabbitMQ.Client;
 using Shared.Contracts.Enums;
 using Shared.Contracts.Messages;
 using Shared.Messaging;
-using Shared.Persistence.ProcessedMessages;
 using Shouldly;
 
 namespace FoodOrdering.IntegrationTests.Admin;
@@ -221,22 +218,7 @@ public class OrderPlacedConsumerTests(PostgresFixture postgres)
         await consumer.HandleAsync(message, scope.ServiceProvider, CancellationToken.None);
     }
 
-    private static IHost BuildHost(string connectionString)
-    {
-        HostApplicationBuilder builder = Host.CreateApplicationBuilder();
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["RabbitMq:Host"] = "localhost",
-            ["RabbitMq:Username"] = "unused",
-            ["RabbitMq:Password"] = "unused",
-            ["RabbitMq:ExchangeName"] = "food.events"
-        });
-        builder.Services.AddRabbitMq(builder.Configuration);
-        builder.Services.AddDbContext<AdminDbContext>(options => options.UseNpgsql(connectionString));
-        builder.Services.AddProcessedMessages<AdminDbContext, ProcessedMessage>();
-        builder.Services.AddAdminServices();
-        return builder.Build();
-    }
+    private static IHost BuildHost(string connectionString) => AdminConsumerHost.Build(connectionString);
 
     private async Task<(Guid BurgerId, Guid FriesId)> SeedMenuAsync(string connectionString)
     {
