@@ -189,6 +189,52 @@ public class OrderServiceTests(PostgresFixture postgres)
         own.CanCancel.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(PaymentMethod.Cash, PaymentStatus.CashOnDelivery)]
+    [InlineData(PaymentMethod.Online, PaymentStatus.Unpaid)]
+    public async Task GetConfirmationAsync_ShouldReturnThePlacedOrder_WhenItIsTheCustomersOwn(PaymentMethod method, PaymentStatus expected)
+    {
+        string connectionString = await SeedWithCartAsync();
+        Guid orderId;
+        await using (ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString))
+        {
+            ServiceResult<Guid> placed = await NewService(context).PlaceOrderAsync(_seed.Sara.Id, NewCheckout(method));
+            placed.Succeeded.ShouldBeTrue();
+            orderId = placed.Value;
+        }
+
+        await using ClientDbContext check = postgres.NewDbContext<ClientDbContext>(connectionString);
+        OrderConfirmationViewModel? confirmation = await NewService(check).GetConfirmationAsync(orderId, _seed.Sara.Id);
+
+        confirmation.ShouldNotBeNull();
+        confirmation.OrderId.ShouldBe(orderId);
+        confirmation.OrderNumber.ShouldBe("FO-1000");
+        confirmation.Status.ShouldBe(OrderStatus.Placed);
+        confirmation.PaymentStatus.ShouldBe(expected);
+        confirmation.DeliveryType.ShouldBe(DeliveryType.Delivery);
+        confirmation.Address.ShouldBe("Hamra Street 12, Beirut");
+        confirmation.EstimatedTime.ShouldBeNull();
+        confirmation.Total.ShouldBe(27.00m);
+        confirmation.Items.Count.ShouldBe(2);
+        confirmation.Items.Single(i => i.MenuItemId == _seed.ChickenBurger.Id).Extras
+            .Select(e => e.Name).ShouldBe(["Bacon", "Extra cheese"]);
+        check.ChangeTracker.Entries().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetConfirmationAsync_ShouldReturnNull_WhenTheOrderBelongsToAnotherCustomer()
+    {
+        string connectionString = await SeedCustomersAsync();
+        Guid omarsOrderId = await SeedOrderAsync(connectionString, _seed.Omar.Id, "FO-1000", OrderStatus.Placed);
+
+        await using ClientDbContext context = postgres.NewDbContext<ClientDbContext>(connectionString);
+        OrderService service = NewService(context);
+
+        (await service.GetConfirmationAsync(omarsOrderId, _seed.Sara.Id)).ShouldBeNull();
+        (await service.GetConfirmationAsync(Guid.NewGuid(), _seed.Sara.Id)).ShouldBeNull();
+        (await service.GetConfirmationAsync(omarsOrderId, _seed.Omar.Id)).ShouldNotBeNull().OrderNumber.ShouldBe("FO-1000");
+    }
+
     [Fact]
     public async Task GetCustomerOrdersAsync_ShouldReturnOnlyTheCustomersOwnOrdersNewestFirst()
     {

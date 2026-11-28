@@ -12,5 +12,7 @@ public interface IOrderService
 
     Task<OrderDetailsViewModel?> GetOrderDetailsAsync(Guid orderId, Guid customerId, CancellationToken ct = default);
 
+    Task<OrderConfirmationViewModel?> GetConfirmationAsync(Guid orderId, Guid customerId, CancellationToken ct = default);
+
     Task<ServiceResult> CancelOrderAsync(Guid orderId, Guid customerId, CancellationToken ct = default);
 }
