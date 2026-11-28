@@ -176,6 +176,7 @@ Fast tests with no database, no RabbitMQ and no Docker. Put each test in the fol
 | `Persistence/` | `Shared.Persistence` code that needs no database (e.g. `OutboxMessage`) |
 | `Client/` | Client.Web app setup, e.g. `ErrorHandlingExtensions` with an in-memory `TestServer` |
 | `Client/Hubs/` | SignalR hubs and notifiers in Client.Web (hub access with an in-memory `TestServer`, notifier with a substituted `IHubContext`) |
+| `Client/Controllers/` | Controllers in Client.Web, called directly with substituted services and a test `ClaimsPrincipal` |
 | `Client/Consumers/` | RabbitMQ consumers in Client.Web |
 | `Client/Services/` | Services in Client.Web |
 | `Admin/` | Admin.Web app setup, e.g. `ErrorHandlingExtensions` with an in-memory `TestServer` |

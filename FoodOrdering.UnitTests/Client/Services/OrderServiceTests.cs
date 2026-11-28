@@ -478,6 +478,66 @@ public class OrderServiceTests
         result.CanRate.ShouldBeFalse();
     }
 
+    [Fact]
+    public async Task GetConfirmationAsync_ShouldMapTheOrderNumberItemsAndTotal()
+    {
+        Order order = NewDetailedOrder(OrderStatus.Accepted);
+        order.EstimatedDeliveryTime = new DateTime(2026, 11, 24, 13, 15, 0, DateTimeKind.Utc);
+
+        OrderConfirmationViewModel? result = await _service.GetConfirmationAsync(order.Id, _customer.Id);
+
+        result.ShouldNotBeNull();
+        result.OrderId.ShouldBe(order.Id);
+        result.OrderNumber.ShouldBe("FO-1000");
+        result.Total.ShouldBe(27.00m);
+        result.DeliveryType.ShouldBe(DeliveryType.Delivery);
+        result.Address.ShouldBe("Hamra Street 12, Beirut");
+        result.PaymentStatus.ShouldBe(PaymentStatus.CashOnDelivery);
+        result.Status.ShouldBe(OrderStatus.Accepted);
+        result.EstimatedTime.ShouldBe(order.EstimatedDeliveryTime);
+        result.Items.Count.ShouldBe(2);
+        OrderItemViewModel burger = result.Items.Single(i => i.MenuItemId == _burger.Id);
+        burger.Quantity.ShouldBe(2);
+        burger.Extras.Select(e => (e.Name, e.Price)).ShouldBe([("Bacon", 1.50m), ("Extra cheese", 1.00m)]);
+        burger.LineTotal.ShouldBe(24.00m);
+        result.Items.Single(i => i.MenuItemId == _lemonade.Id).LineTotal.ShouldBe(3.00m);
+    }
+
+    [Theory]
+    [InlineData(PaymentStatus.CashOnDelivery)]
+    [InlineData(PaymentStatus.Unpaid)]
+    [InlineData(PaymentStatus.Paid)]
+    public async Task GetConfirmationAsync_ShouldReturnThePaymentStatusOfTheOrder(PaymentStatus status)
+    {
+        Order order = NewDetailedOrder(OrderStatus.Placed);
+        order.PaymentMethod = status == PaymentStatus.CashOnDelivery ? PaymentMethod.Cash : PaymentMethod.Online;
+        order.PaymentStatus = status;
+
+        OrderConfirmationViewModel? result = await _service.GetConfirmationAsync(order.Id, _customer.Id);
+
+        result.ShouldNotBeNull();
+        result.PaymentStatus.ShouldBe(status);
+    }
+
+    [Fact]
+    public async Task GetConfirmationAsync_ShouldReturnNull_WhenTheOrderBelongsToAnotherCustomer()
+    {
+        Order order = NewOrder(OrderStatus.Placed, Guid.NewGuid());
+        _orders.GetOrderWithDetailsAsync(order.Id, Arg.Any<CancellationToken>()).Returns(order);
+
+        OrderConfirmationViewModel? result = await _service.GetConfirmationAsync(order.Id, _customer.Id);
+
+        result.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetConfirmationAsync_ShouldReturnNull_WhenTheOrderDoesNotExist()
+    {
+        OrderConfirmationViewModel? result = await _service.GetConfirmationAsync(Guid.NewGuid(), _customer.Id);
+
+        result.ShouldBeNull();
+    }
+
     private Order GivenOrder(OrderStatus status, Guid? customerId = null)
     {
         Order order = NewOrder(status, customerId ?? _customer.Id);

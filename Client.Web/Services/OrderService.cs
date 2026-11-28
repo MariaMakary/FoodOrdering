@@ -112,12 +112,7 @@ public class OrderService(IOrderRepository orders, ICartRepository carts, IOutbo
             return null;
         }
 
-        HashSet<Guid> ratedDishIds = order.Ratings.Select(r => r.MenuItemId).ToHashSet();
-        List<OrderItemViewModel> items = order.Items
-            .OrderBy(i => i.CreatedAt)
-            .ThenBy(i => i.Name)
-            .Select(i => ToItemViewModel(i, ratedDishIds))
-            .ToList();
+        List<OrderItemViewModel> items = ToItemViewModels(order);
 
         return new OrderDetailsViewModel
         {
@@ -140,6 +135,31 @@ public class OrderService(IOrderRepository orders, ICartRepository carts, IOutbo
                 .ToList(),
             CanCancel = order.Status == OrderStatus.Placed,
             CanRate = order.Status == OrderStatus.Delivered && items.Any(i => !i.IsRated)
+        };
+    }
+
+    public async Task<OrderConfirmationViewModel?> GetConfirmationAsync(
+        Guid orderId,
+        Guid customerId,
+        CancellationToken ct = default)
+    {
+        Order? order = await orders.GetOrderWithDetailsAsync(orderId, ct);
+        if (order is null || order.CustomerId != customerId)
+        {
+            return null;
+        }
+
+        return new OrderConfirmationViewModel
+        {
+            OrderId = order.Id,
+            OrderNumber = order.OrderNumber,
+            Items = ToItemViewModels(order),
+            Total = order.Total,
+            DeliveryType = order.DeliveryType,
+            Address = order.Address,
+            PaymentStatus = order.PaymentStatus,
+            Status = order.Status,
+            EstimatedTime = order.EstimatedDeliveryTime
         };
     }
 
@@ -187,6 +207,17 @@ public class OrderService(IOrderRepository orders, ICartRepository carts, IOutbo
         }
 
         return ServiceResult.Success();
+    }
+
+    private static List<OrderItemViewModel> ToItemViewModels(Order order)
+    {
+        HashSet<Guid> ratedDishIds = order.Ratings.Select(r => r.MenuItemId).ToHashSet();
+
+        return order.Items
+            .OrderBy(i => i.CreatedAt)
+            .ThenBy(i => i.Name)
+            .Select(i => ToItemViewModel(i, ratedDishIds))
+            .ToList();
     }
 
     private static OrderItemViewModel ToItemViewModel(OrderItem item, HashSet<Guid> ratedDishIds)

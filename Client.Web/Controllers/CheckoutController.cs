@@ -39,7 +39,7 @@ public class CheckoutController(IOrderService orders, ICartService cart, IAccoun
         {
             return model.PaymentMethod == PaymentMethod.Online
                 ? LocalRedirect($"/Payment/Checkout/{result.Value}")
-                : LocalRedirect($"/Checkout/Confirmation/{result.Value}");
+                : RedirectToAction(nameof(Confirmation), new { orderId = result.Value });
         }
 
         if (result.Error == OrderErrors.AddressRequired)
@@ -49,6 +49,18 @@ public class CheckoutController(IOrderService orders, ICartService cart, IAccoun
         }
 
         return await HandleFailureAsync(result.Error!);
+    }
+
+    [HttpGet("Checkout/Confirmation/{orderId:guid}")]
+    public async Task<IActionResult> Confirmation(Guid orderId, CancellationToken ct)
+    {
+        OrderConfirmationViewModel? model = await orders.GetConfirmationAsync(orderId, User.GetCustomerId(), ct);
+        if (model is null)
+        {
+            return NotFound();
+        }
+
+        return View(model);
     }
 
     private async Task<IActionResult> RedisplayAsync(Guid customerId, CheckoutViewModel model, CancellationToken ct)
