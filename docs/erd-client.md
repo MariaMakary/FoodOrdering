@@ -103,7 +103,9 @@ Also: `Order.Status = Cancelled`. If Admin had already accepted it, Admin's `Ord
 | `customerName` | `Users.FirstName` + `Users.LastName` (via `Rating.CustomerId`) |
 | `stars` | `Rating.Stars` |
 | `comment` | `Rating.Comment` |
-| `ratedAt` | `Rating.CreatedAt` (the Client creates the row when the dish is rated) |
+| `ratedAt` | The time `RatingService` takes just before the save, the same for every dish rated together. `Rating.CreatedAt` is set by `AuditInterceptor` in that same save, so it can be a few milliseconds later. |
+
+Also: one `Rating` and one `DishRated` per dish, saved in one `SaveChangesAsync` with the outbox rows (UNI-73). Only the owner of a `Delivered` order can rate, and each dish once per order: a second rating fails on the unique index `IX_Ratings_OrderId_MenuItemId` and the customer sees "already rated".
 
 ### `OrderStatusChanged` (received)
 
