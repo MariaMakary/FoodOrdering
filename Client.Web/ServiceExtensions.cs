@@ -48,6 +48,8 @@ public static class ServiceExtensions
         services.AddScoped<ICartService, CartService>();
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IOrderService, OrderService>();
+        services.AddScoped<IRatingRepository, RatingRepository>();
+        services.AddScoped<IRatingService, RatingService>();
         services.AddScoped<IOrderStatusRepository, OrderStatusRepository>();
         services.AddScoped<IOrderStatusService, OrderStatusService>();
         services.AddScoped<IMenuSyncRepository, MenuSyncRepository>();
